@@ -1,0 +1,18 @@
+// Some pub plugins (e.g. syncfusion_flutter_pdfviewer) still declare compileSdk 31, which
+// triggers slow/hanging "Install Android SDK Platform 31" during Gradle. Align all
+// Android library/application modules to at least API 35 with the app module.
+subprojects { subproject ->
+    subproject.afterEvaluate {
+        def android = subproject.extensions.findByName("android")
+        if (android == null) return
+        try {
+            if (android.hasProperty("compileSdk")) {
+                def cur = android.compileSdk
+                if (cur instanceof Integer && cur < 35) {
+                    android.compileSdk = 35
+                }
+            }
+        } catch (ignored) {
+        }
+    }
+}
