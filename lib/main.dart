@@ -11,7 +11,8 @@ import 'package:office_toolspro/services/file_store.dart';
 
 class ThemeController {
   ThemeController._();
-  static final ValueNotifier<ThemeMode> mode = ValueNotifier<ThemeMode>(ThemeMode.light);
+  static final ValueNotifier<ThemeMode> mode =
+      ValueNotifier<ThemeMode>(ThemeMode.light);
 }
 
 Future<void> main() async {
@@ -35,7 +36,8 @@ class OfficeToolsApp extends StatelessWidget {
   }
 
   static final String _geminiApiKey = _envOrDefine('GEMINI_API_KEY');
-  static final String _cloudConvertApiKey = _envOrDefine('CLOUDCONVERT_API_KEY');
+  static final String _cloudConvertApiKey =
+      _envOrDefine('CLOUDCONVERT_API_KEY');
 
   @override
   Widget build(BuildContext context) {
@@ -77,7 +79,8 @@ class OfficeToolsApp extends StatelessWidget {
               filled: true,
               fillColor: Colors.white,
               isDense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Color(0xFFD6DEEA)),
@@ -88,7 +91,8 @@ class OfficeToolsApp extends StatelessWidget {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFF1857E6), width: 1.4),
+                borderSide:
+                    const BorderSide(color: Color(0xFF1857E6), width: 1.4),
               ),
             ),
             elevatedButtonTheme: ElevatedButtonThemeData(
@@ -96,20 +100,23 @@ class OfficeToolsApp extends StatelessWidget {
                 backgroundColor: const Color(0xFF1857E6),
                 foregroundColor: Colors.white,
                 minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
                 textStyle: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
             outlinedButtonTheme: OutlinedButtonThemeData(
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
                 side: const BorderSide(color: Color(0xFFCBD5E1)),
                 textStyle: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
             chipTheme: ChipThemeData(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999)),
               side: const BorderSide(color: Color(0xFFCBD5E1)),
               labelStyle: const TextStyle(fontWeight: FontWeight.w700),
               selectedColor: const Color(0xFFE2EBFF),
@@ -120,8 +127,10 @@ class OfficeToolsApp extends StatelessWidget {
             snackBarTheme: SnackBarThemeData(
               behavior: SnackBarBehavior.floating,
               backgroundColor: const Color(0xFF0F172A),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              contentTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              contentTextStyle: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.w600),
             ),
           ),
           darkTheme: ThemeData(
@@ -138,7 +147,8 @@ class OfficeToolsApp extends StatelessWidget {
               filled: true,
               fillColor: const Color(0xFF1E293B),
               isDense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Color(0xFF334155)),
@@ -149,7 +159,8 @@ class OfficeToolsApp extends StatelessWidget {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFF60A5FA), width: 1.3),
+                borderSide:
+                    const BorderSide(color: Color(0xFF60A5FA), width: 1.3),
               ),
             ),
             elevatedButtonTheme: ElevatedButtonThemeData(
@@ -157,20 +168,23 @@ class OfficeToolsApp extends StatelessWidget {
                 backgroundColor: const Color(0xFF1857E6),
                 foregroundColor: Colors.white,
                 minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
                 textStyle: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
             outlinedButtonTheme: OutlinedButtonThemeData(
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
                 side: const BorderSide(color: Color(0xFF334155)),
                 textStyle: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
             chipTheme: ChipThemeData(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999)),
               side: const BorderSide(color: Color(0xFF334155)),
               labelStyle: const TextStyle(fontWeight: FontWeight.w700),
               selectedColor: const Color(0xFF1D4ED8),
@@ -181,8 +195,10 @@ class OfficeToolsApp extends StatelessWidget {
             snackBarTheme: SnackBarThemeData(
               behavior: SnackBarBehavior.floating,
               backgroundColor: const Color(0xFF111827),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              contentTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              contentTextStyle: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.w600),
             ),
           ),
           home: const HomeScreen(),
@@ -190,8 +206,8 @@ class OfficeToolsApp extends StatelessWidget {
             '/scanner': (context) => ScannerScreen(apiKey: _geminiApiKey),
             '/image-tools': (context) => const ImageToolsScreen(),
             '/pdf-tools': (context) => PdfToolsScreen(apiKey: _geminiApiKey),
-            '/convert': (context) => ConvertScreen(cloudConvertApiKey: _cloudConvertApiKey),
-            '/compress': (context) => const CompressScreen(),
+            '/convert': (context) =>
+                ConvertScreen(cloudConvertApiKey: _cloudConvertApiKey),
             '/calculators': (context) => const CalculatorsScreen(),
             '/my-files': (context) => const MyFilesScreen(),
           },

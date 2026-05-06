@@ -3,9 +3,12 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
+import 'package:share_plus/share_plus.dart';
 
 enum _CalcTab { gst, sip, emi, simple }
+
 enum _GstMode { exclusive, inclusive }
+
 enum _SipMode { sip, lumpsum }
 
 class _SipYearPoint {
@@ -17,6 +20,22 @@ class _SipYearPoint {
     required this.year,
     required this.invested,
     required this.value,
+  });
+}
+
+class _EmiSchedulePoint {
+  final int month;
+  final int year;
+  final double principalPaid;
+  final double interestPaid;
+  final double balance;
+
+  const _EmiSchedulePoint({
+    required this.month,
+    required this.year,
+    required this.principalPaid,
+    required this.interestPaid,
+    required this.balance,
   });
 }
 
@@ -54,6 +73,8 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
   double _emiMonthly = 0;
   double _emiInterest = 0;
   double _emiTotal = 0;
+  bool _emiMonthlyView = true;
+  List<_EmiSchedulePoint> _emiSchedule = const [];
 
   String _simpleResult = 'Enter expression';
 
@@ -91,7 +112,8 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
     super.dispose();
   }
 
-  double _parse(TextEditingController controller) => double.tryParse(controller.text.trim()) ?? 0.0;
+  double _parse(TextEditingController controller) =>
+      double.tryParse(controller.text.trim()) ?? 0.0;
 
   /// Readable labels on light theme (default ChoiceChip styling is often too faint).
   Widget _calcChip({
@@ -117,7 +139,8 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
       selected: selected,
       showCheckmark: false,
       selectedColor: const Color(0xFFE2EBFF),
-      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+      backgroundColor:
+          isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
       side: BorderSide(
         color: selected
             ? const Color(0xFF1857E6)
@@ -220,11 +243,15 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
     } else {
       invested = lumpsum;
       for (int y = 1; y <= years.ceil(); y++) {
-        value = monthlyRate == 0 ? invested : invested * math.pow(1 + annualRate / 100, y);
+        value = monthlyRate == 0
+            ? invested
+            : invested * math.pow(1 + annualRate / 100, y);
         points.add(_SipYearPoint(year: y, invested: invested, value: value));
       }
       if (years < 1) {
-        value = monthlyRate == 0 ? invested : invested * math.pow(1 + annualRate / 100, years);
+        value = monthlyRate == 0
+            ? invested
+            : invested * math.pow(1 + annualRate / 100, years);
       }
     }
     setState(() {
@@ -244,6 +271,7 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
         _emiMonthly = 0;
         _emiInterest = 0;
         _emiTotal = 0;
+        _emiSchedule = const [];
       });
       return;
     }
@@ -256,10 +284,29 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
             (math.pow(1 + monthlyRate, months) - 1);
     final totalPayable = emi * months;
     final interest = totalPayable - principal;
+    final schedule = <_EmiSchedulePoint>[];
+    double balance = principal;
+    for (int m = 1; m <= months; m++) {
+      final monthInterest = balance * monthlyRate;
+      double monthPrincipal = emi - monthInterest;
+      if (monthPrincipal > balance) monthPrincipal = balance;
+      balance -= monthPrincipal;
+      if (balance < 0) balance = 0;
+      schedule.add(
+        _EmiSchedulePoint(
+          month: m,
+          year: ((m - 1) ~/ 12) + 1,
+          principalPaid: monthPrincipal,
+          interestPaid: monthInterest,
+          balance: balance,
+        ),
+      );
+    }
     setState(() {
       _emiMonthly = emi;
       _emiInterest = interest;
       _emiTotal = totalPayable;
+      _emiSchedule = schedule;
     });
   }
 
@@ -269,7 +316,8 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
       setState(() => _simpleResult = 'Enter expression');
       return;
     }
-    final match = RegExp(r'^(-?\d+(\.\d+)?)([+\-*/])(-?\d+(\.\d+)?)$').firstMatch(expr);
+    final match =
+        RegExp(r'^(-?\d+(\.\d+)?)([+\-*/])(-?\d+(\.\d+)?)$').firstMatch(expr);
     if (match == null) {
       setState(() => _simpleResult = 'Use format like 12+8, 20*3, 50/5');
       return;
@@ -322,6 +370,7 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
         _emiPrincipalController.clear();
         _emiYearsController.text = '5';
         _emiRateController.text = '9';
+        _emiMonthlyView = true;
         _calculateEmiLive();
         break;
       case _CalcTab.simple:
@@ -332,6 +381,57 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
     setState(() {});
   }
 
+  void _setNumericValue(
+    TextEditingController controller,
+    double value, {
+    int decimals = 0,
+  }) {
+    final text = value.toStringAsFixed(decimals);
+    if (controller.text == text) return;
+    controller.text = text;
+  }
+
+  String _currentResultSummary() {
+    switch (_tab) {
+      case _CalcTab.gst:
+        return [
+          'GST (${_gstMode == _GstMode.exclusive ? 'Exclusive' : 'Inclusive'})',
+          'Base Amount: ${_money(_gstBase)}',
+          'GST Amount: ${_money(_gstTax)}',
+          'Total: ${_money(_gstTotal)}',
+        ].join('\n');
+      case _CalcTab.sip:
+        return [
+          'SIP/Lumpsum (${_sipMode == _SipMode.sip ? 'SIP' : 'Lumpsum'})',
+          'Invested: ${_money(_sipInvested)}',
+          'Current Value: ${_money(_sipValue)}',
+          'Returns: ${_money(_sipValue - _sipInvested)}',
+        ].join('\n');
+      case _CalcTab.emi:
+        return [
+          'EMI',
+          'Monthly EMI: ${_money(_emiMonthly)}',
+          'Total Interest: ${_money(_emiInterest)}',
+          'Total Payable: ${_money(_emiTotal)}',
+        ].join('\n');
+      case _CalcTab.simple:
+        return 'Simple Calculator\n$_simpleResult';
+    }
+  }
+
+  Future<void> _copyCurrentSummary() async {
+    final text = _currentResultSummary();
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Result copied')),
+    );
+  }
+
+  Future<void> _shareCurrentSummary() async {
+    await SharePlus.instance.share(ShareParams(text: _currentResultSummary()));
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -339,6 +439,16 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
       appBar: AppBar(
         title: const Text('Calculators'),
         actions: [
+          IconButton(
+            tooltip: 'Copy result',
+            onPressed: _copyCurrentSummary,
+            icon: const Icon(Icons.copy_all_rounded),
+          ),
+          IconButton(
+            tooltip: 'Share result',
+            onPressed: _shareCurrentSummary,
+            icon: const Icon(Icons.share_rounded),
+          ),
           TextButton.icon(
             onPressed: _resetCurrentCalculator,
             icon: const Icon(Icons.refresh_rounded),
@@ -356,243 +466,395 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _calcChip(
-                isDark: isDark,
-                label: 'GST',
-                selected: _tab == _CalcTab.gst,
-                onSelected: (_) => setState(() => _tab = _CalcTab.gst),
-              ),
-              _calcChip(
-                isDark: isDark,
-                label: 'SIP',
-                selected: _tab == _CalcTab.sip,
-                onSelected: (_) => setState(() => _tab = _CalcTab.sip),
-              ),
-              _calcChip(
-                isDark: isDark,
-                label: 'EMI',
-                selected: _tab == _CalcTab.emi,
-                onSelected: (_) => setState(() => _tab = _CalcTab.emi),
-              ),
-              _calcChip(
-                isDark: isDark,
-                label: 'Simple',
-                selected: _tab == _CalcTab.simple,
-                onSelected: (_) => setState(() => _tab = _CalcTab.simple),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (_tab == _CalcTab.gst)
-            _CalcCard(
-              title: 'GST Calculator',
-              subtitle: 'Switch between Tax Exclusive and Tax Inclusive.',
-              isDark: isDark,
-              fields: [
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    Expanded(
-                      child: _calcChip(
-                        isDark: isDark,
-                        label: 'Tax Exclusive',
-                        selected: _gstMode == _GstMode.exclusive,
-                        onSelected: (_) {
-                          setState(() => _gstMode = _GstMode.exclusive);
-                          _calculateGstLive();
-                        },
-                      ),
+                    _calcChip(
+                      isDark: isDark,
+                      label: 'GST',
+                      selected: _tab == _CalcTab.gst,
+                      onSelected: (_) => setState(() => _tab = _CalcTab.gst),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _calcChip(
-                        isDark: isDark,
-                        label: 'Tax Inclusive',
-                        selected: _gstMode == _GstMode.inclusive,
-                        onSelected: (_) {
-                          setState(() => _gstMode = _GstMode.inclusive);
-                          _calculateGstLive();
-                        },
-                      ),
+                    _calcChip(
+                      isDark: isDark,
+                      label: 'SIP',
+                      selected: _tab == _CalcTab.sip,
+                      onSelected: (_) => setState(() => _tab = _CalcTab.sip),
+                    ),
+                    _calcChip(
+                      isDark: isDark,
+                      label: 'EMI',
+                      selected: _tab == _CalcTab.emi,
+                      onSelected: (_) => setState(() => _tab = _CalcTab.emi),
+                    ),
+                    _calcChip(
+                      isDark: isDark,
+                      label: 'Simple',
+                      selected: _tab == _CalcTab.simple,
+                      onSelected: (_) => setState(() => _tab = _CalcTab.simple),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                _NumberField(controller: _gstAmountController, label: 'Amount'),
-                _NumberField(controller: _gstRateController, label: 'GST %'),
-              ],
-              resultWidget: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                child: _SummaryBlock(
-                  key: ValueKey('${_gstBase.toStringAsFixed(2)}-${_gstTax.toStringAsFixed(2)}'),
-                  lines: [
-                    'Base Amount: ${_money(_gstBase)}',
-                    'GST Amount: ${_money(_gstTax)}',
-                    'Total: ${_money(_gstTotal)}',
-                  ],
-                ),
-              ),
-            ),
-          if (_tab == _CalcTab.sip)
-            _CalcCard(
-              title: 'SIP & Lumpsum Calculator',
-              subtitle: 'Live projection with yearly graph and allocation pie.',
-              isDark: isDark,
-              fields: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: _calcChip(
-                        isDark: isDark,
-                        label: 'SIP',
-                        selected: _sipMode == _SipMode.sip,
-                        onSelected: (_) {
-                          setState(() => _sipMode = _SipMode.sip);
-                          _calculateSipLive();
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _calcChip(
-                        isDark: isDark,
-                        label: 'Lumpsum',
-                        selected: _sipMode == _SipMode.lumpsum,
-                        onSelected: (_) {
-                          setState(() => _sipMode = _SipMode.lumpsum);
-                          _calculateSipLive();
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                if (_sipMode == _SipMode.sip)
-                  _NumberField(controller: _sipMonthlyController, label: 'Monthly Investment'),
-                if (_sipMode == _SipMode.lumpsum)
-                  _NumberField(controller: _sipLumpsumController, label: 'Lumpsum Amount'),
-                _NumberField(controller: _sipYearsController, label: 'Years'),
-                _NumberField(controller: _sipRateController, label: 'Expected Return % (annual)'),
-              ],
-              resultWidget: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                child: Column(
-                  key: ValueKey('${_sipInvested.toStringAsFixed(1)}-${_sipValue.toStringAsFixed(1)}'),
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _SummaryBlock(
-                      lines: [
-                        'Invested: ${_money(_sipInvested)}',
-                        'Current Value: ${_money(_sipValue)}',
-                        'Returns: ${_money(_sipValue - _sipInvested)}',
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _SectionLabel('Growth Chart (Year vs Value)'),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 160,
-                      child: _SipLineChart(points: _sipPoints),
-                    ),
-                    const SizedBox(height: 12),
-                    _SectionLabel('Invested vs Returns'),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 160,
-                      child: _PieChart(
-                        slices: [
-                          _PieSlice(
-                            label: 'Invested',
-                            value: _sipInvested,
-                            color: const Color(0xFF1857E6),
+                const SizedBox(height: 16),
+                if (_tab == _CalcTab.gst)
+                  _CalcCard(
+                    title: 'GST Calculator',
+                    subtitle: 'Switch between Tax Exclusive and Tax Inclusive.',
+                    isDark: isDark,
+                    fields: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _calcChip(
+                              isDark: isDark,
+                              label: 'Tax Exclusive',
+                              selected: _gstMode == _GstMode.exclusive,
+                              onSelected: (_) {
+                                setState(() => _gstMode = _GstMode.exclusive);
+                                _calculateGstLive();
+                              },
+                            ),
                           ),
-                          _PieSlice(
-                            label: 'Returns',
-                            value: math.max(0, _sipValue - _sipInvested),
-                            color: const Color(0xFF16A34A),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _calcChip(
+                              isDark: isDark,
+                              label: 'Tax Inclusive',
+                              selected: _gstMode == _GstMode.inclusive,
+                              onSelected: (_) {
+                                setState(() => _gstMode = _GstMode.inclusive);
+                                _calculateGstLive();
+                              },
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          if (_tab == _CalcTab.emi)
-            _CalcCard(
-              title: 'EMI Calculator',
-              subtitle: 'Live monthly EMI with dynamic principal-interest split.',
-              isDark: isDark,
-              fields: [
-                _NumberField(controller: _emiPrincipalController, label: 'Loan Amount'),
-                _NumberField(controller: _emiYearsController, label: 'Tenure (Years)'),
-                _NumberField(controller: _emiRateController, label: 'Interest % (annual)'),
-              ],
-              resultWidget: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                child: Column(
-                  key: ValueKey('${_emiMonthly.toStringAsFixed(1)}-${_emiTotal.toStringAsFixed(1)}'),
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _SummaryBlock(
-                      lines: [
-                        'Monthly EMI: ${_money(_emiMonthly)}',
-                        'Total Interest: ${_money(_emiInterest)}',
-                        'Total Payable: ${_money(_emiTotal)}',
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _SectionLabel('Principal vs Interest'),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 160,
-                      child: _PieChart(
-                        slices: [
-                          _PieSlice(
-                            label: 'Principal',
-                            value: _parse(_emiPrincipalController),
-                            color: const Color(0xFF1857E6),
-                          ),
-                          _PieSlice(
-                            label: 'Interest',
-                            value: math.max(0, _emiInterest),
-                            color: const Color(0xFFEA580C),
-                          ),
+                      const SizedBox(height: 8),
+                      _NumberField(
+                          controller: _gstAmountController, label: 'Amount'),
+                      _NumberField(
+                          controller: _gstRateController, label: 'GST %'),
+                      const SizedBox(height: 4),
+                      _SliderField(
+                        label: 'GST rate',
+                        value: (_parse(_gstRateController)).clamp(0, 40),
+                        min: 0,
+                        max: 40,
+                        divisions: 40,
+                        valueLabel: '${_parse(_gstRateController).round()}%',
+                        onChanged: (v) =>
+                            _setNumericValue(_gstRateController, v),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [5, 12, 18, 28]
+                            .map(
+                              (p) => ActionChip(
+                                label: Text('$p%'),
+                                onPressed: () => _setNumericValue(
+                                    _gstRateController, p.toDouble()),
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
+                    ],
+                    resultWidget: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: _SummaryBlock(
+                        key: ValueKey(
+                            '${_gstBase.toStringAsFixed(2)}-${_gstTax.toStringAsFixed(2)}'),
+                        lines: [
+                          'Base Amount: ${_money(_gstBase)}',
+                          'GST Amount: ${_money(_gstTax)}',
+                          'Total: ${_money(_gstTotal)}',
                         ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-          if (_tab == _CalcTab.simple)
-            _CalcCard(
-              title: 'Simple Calculator',
-              subtitle: 'Real-time result. No need to press calculate.',
-              isDark: isDark,
-              fields: [
-                TextField(
-                  controller: _simpleExprController,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-*/. ]')),
-                  ],
-                  decoration: const InputDecoration(
-                    labelText: 'Expression (e.g. 120*3)',
-                    border: OutlineInputBorder(),
                   ),
-                ),
-              ],
-              resultWidget: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: _SummaryBlock(
-                  key: ValueKey(_simpleResult),
-                  lines: [_simpleResult],
-                ),
-              ),
-            ),
+                if (_tab == _CalcTab.sip)
+                  _CalcCard(
+                    title: 'SIP & Lumpsum Calculator',
+                    subtitle:
+                        'Live projection with yearly graph and allocation pie.',
+                    isDark: isDark,
+                    fields: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _calcChip(
+                              isDark: isDark,
+                              label: 'SIP',
+                              selected: _sipMode == _SipMode.sip,
+                              onSelected: (_) {
+                                setState(() => _sipMode = _SipMode.sip);
+                                _calculateSipLive();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _calcChip(
+                              isDark: isDark,
+                              label: 'Lumpsum',
+                              selected: _sipMode == _SipMode.lumpsum,
+                              onSelected: (_) {
+                                setState(() => _sipMode = _SipMode.lumpsum);
+                                _calculateSipLive();
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (_sipMode == _SipMode.sip)
+                        _NumberField(
+                            controller: _sipMonthlyController,
+                            label: 'Monthly Investment'),
+                      if (_sipMode == _SipMode.lumpsum)
+                        _NumberField(
+                            controller: _sipLumpsumController,
+                            label: 'Lumpsum Amount'),
+                      _NumberField(
+                          controller: _sipYearsController, label: 'Years'),
+                      _NumberField(
+                          controller: _sipRateController,
+                          label: 'Expected Return % (annual)'),
+                      const SizedBox(height: 4),
+                      _SliderField(
+                        label: 'Years',
+                        value: (_parse(_sipYearsController)).clamp(1, 40),
+                        min: 1,
+                        max: 40,
+                        divisions: 39,
+                        valueLabel: '${_parse(_sipYearsController).round()}y',
+                        onChanged: (v) =>
+                            _setNumericValue(_sipYearsController, v),
+                      ),
+                      _SliderField(
+                        label: 'Expected return',
+                        value: (_parse(_sipRateController)).clamp(0, 30),
+                        min: 0,
+                        max: 30,
+                        divisions: 60,
+                        valueLabel:
+                            '${_parse(_sipRateController).toStringAsFixed(1)}%',
+                        onChanged: (v) => _setNumericValue(
+                            _sipRateController, v,
+                            decimals: 1),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [8, 10, 12, 14, 16]
+                            .map(
+                              (p) => ActionChip(
+                                label: Text('$p%'),
+                                onPressed: () => _setNumericValue(
+                                    _sipRateController, p.toDouble()),
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
+                    ],
+                    resultWidget: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: Column(
+                        key: ValueKey(
+                            '${_sipInvested.toStringAsFixed(1)}-${_sipValue.toStringAsFixed(1)}'),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _SummaryBlock(
+                            lines: [
+                              'Invested: ${_money(_sipInvested)}',
+                              'Current Value: ${_money(_sipValue)}',
+                              'Returns: ${_money(_sipValue - _sipInvested)}',
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          const _SectionLabel('Growth Chart (Year vs Value)'),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 160,
+                            child: _SipLineChart(points: _sipPoints),
+                          ),
+                          const SizedBox(height: 12),
+                          const _SectionLabel('Invested vs Returns'),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 160,
+                            child: _PieChart(
+                              slices: [
+                                _PieSlice(
+                                  label: 'Invested',
+                                  value: _sipInvested,
+                                  color: const Color(0xFF1857E6),
+                                ),
+                                _PieSlice(
+                                  label: 'Returns',
+                                  value: math.max(0, _sipValue - _sipInvested),
+                                  color: const Color(0xFF16A34A),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (_tab == _CalcTab.emi)
+                  _CalcCard(
+                    title: 'EMI Calculator',
+                    subtitle:
+                        'Live monthly EMI with dynamic principal-interest split.',
+                    isDark: isDark,
+                    fields: [
+                      _NumberField(
+                          controller: _emiPrincipalController,
+                          label: 'Loan Amount'),
+                      _NumberField(
+                          controller: _emiYearsController,
+                          label: 'Tenure (Years)'),
+                      _NumberField(
+                          controller: _emiRateController,
+                          label: 'Interest % (annual)'),
+                      const SizedBox(height: 4),
+                      _SliderField(
+                        label: 'Tenure (years)',
+                        value: (_parse(_emiYearsController)).clamp(1, 35),
+                        min: 1,
+                        max: 35,
+                        divisions: 34,
+                        valueLabel: '${_parse(_emiYearsController).round()}y',
+                        onChanged: (v) =>
+                            _setNumericValue(_emiYearsController, v),
+                      ),
+                      _SliderField(
+                        label: 'Interest rate',
+                        value: (_parse(_emiRateController)).clamp(0, 25),
+                        min: 0,
+                        max: 25,
+                        divisions: 50,
+                        valueLabel:
+                            '${_parse(_emiRateController).toStringAsFixed(1)}%',
+                        onChanged: (v) => _setNumericValue(
+                            _emiRateController, v,
+                            decimals: 1),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [7, 8, 9, 10, 12]
+                            .map(
+                              (p) => ActionChip(
+                                label: Text('$p%'),
+                                onPressed: () => _setNumericValue(
+                                    _emiRateController, p.toDouble()),
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
+                    ],
+                    resultWidget: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: Column(
+                        key: ValueKey(
+                            '${_emiMonthly.toStringAsFixed(1)}-${_emiTotal.toStringAsFixed(1)}'),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _SummaryBlock(
+                            lines: [
+                              'Monthly EMI: ${_money(_emiMonthly)}',
+                              'Total Interest: ${_money(_emiInterest)}',
+                              'Total Payable: ${_money(_emiTotal)}',
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          const _SectionLabel('Principal vs Interest'),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 160,
+                            child: _PieChart(
+                              slices: [
+                                _PieSlice(
+                                  label: 'Principal',
+                                  value: _parse(_emiPrincipalController),
+                                  color: const Color(0xFF1857E6),
+                                ),
+                                _PieSlice(
+                                  label: 'Interest',
+                                  value: math.max(0, _emiInterest),
+                                  color: const Color(0xFFEA580C),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          const _SectionLabel('Amortization schedule'),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _calcChip(
+                                  isDark: isDark,
+                                  label: 'Monthly',
+                                  selected: _emiMonthlyView,
+                                  onSelected: (_) =>
+                                      setState(() => _emiMonthlyView = true),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _calcChip(
+                                  isDark: isDark,
+                                  label: 'Yearly',
+                                  selected: !_emiMonthlyView,
+                                  onSelected: (_) =>
+                                      setState(() => _emiMonthlyView = false),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _EmiScheduleList(
+                            rows: _emiSchedule,
+                            monthlyView: _emiMonthlyView,
+                            money: _money,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (_tab == _CalcTab.simple)
+                  _CalcCard(
+                    title: 'Simple Calculator',
+                    subtitle: 'Real-time result. No need to press calculate.',
+                    isDark: isDark,
+                    fields: [
+                      TextField(
+                        controller: _simpleExprController,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                              RegExp(r'[0-9+\-*/. ]')),
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Expression (e.g. 120*3)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
+                    resultWidget: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: _SummaryBlock(
+                        key: ValueKey(_simpleResult),
+                        lines: [_simpleResult],
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -624,7 +886,8 @@ class _CalcCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        border: Border.all(
+            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -675,8 +938,186 @@ class _NumberField extends StatelessWidget {
         decoration: InputDecoration(
           labelText: label,
           border: const OutlineInputBorder(),
+          suffixIcon: IconButton(
+            tooltip: 'Open number pad',
+            icon: const Icon(Icons.dialpad_rounded),
+            onPressed: () async {
+              final result = await showDialog<String>(
+                context: context,
+                builder: (_) =>
+                    _NumericPadDialog(initialValue: controller.text),
+              );
+              if (result == null) return;
+              controller.text = result;
+            },
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _SliderField extends StatelessWidget {
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final int? divisions;
+  final String valueLabel;
+  final ValueChanged<double> onChanged;
+
+  const _SliderField({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.valueLabel,
+    required this.onChanged,
+    this.divisions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color:
+                    isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+              ),
+            ),
+            const Spacer(),
+            Text(
+              valueLabel,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1857E6),
+              ),
+            ),
+          ],
+        ),
+        Slider(
+          value: value.clamp(min, max),
+          min: min,
+          max: max,
+          divisions: divisions,
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
+class _NumericPadDialog extends StatefulWidget {
+  final String initialValue;
+  const _NumericPadDialog({required this.initialValue});
+
+  @override
+  State<_NumericPadDialog> createState() => _NumericPadDialogState();
+}
+
+class _NumericPadDialogState extends State<_NumericPadDialog> {
+  late String _value;
+
+  @override
+  void initState() {
+    super.initState();
+    _value = widget.initialValue.trim();
+  }
+
+  void _append(String token) {
+    setState(() {
+      if (token == '.' && _value.contains('.')) return;
+      _value += token;
+    });
+  }
+
+  void _backspace() {
+    if (_value.isEmpty) return;
+    setState(() => _value = _value.substring(0, _value.length - 1));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '00'];
+    return AlertDialog(
+      title: const Text('Number pad'),
+      content: SizedBox(
+        width: 280,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFCBD5E1)),
+              ),
+              child: Text(
+                _value.isEmpty ? '0' : _value,
+                textAlign: TextAlign.right,
+                style:
+                    const TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+              ),
+            ),
+            const SizedBox(height: 12),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: keys.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 1.8,
+              ),
+              itemBuilder: (context, index) {
+                final key = keys[index];
+                return OutlinedButton(
+                  onPressed: () => _append(key),
+                  child: Text(key),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _value = ''),
+                    icon: const Icon(Icons.clear_rounded),
+                    label: const Text('Clear'),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: _backspace,
+                    icon: const Icon(Icons.backspace_outlined),
+                    label: const Text('Back'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _value),
+          child: const Text('Use value'),
+        ),
+      ],
     );
   }
 }
@@ -715,6 +1156,103 @@ class _SummaryBlock extends StatelessWidget {
               ),
             )
             .toList(growable: false),
+      ),
+    );
+  }
+}
+
+class _EmiScheduleList extends StatelessWidget {
+  final List<_EmiSchedulePoint> rows;
+  final bool monthlyView;
+  final String Function(num) money;
+
+  const _EmiScheduleList({
+    required this.rows,
+    required this.monthlyView,
+    required this.money,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
+    final border = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+    if (rows.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+        ),
+        child: const Text('Enter values to see amortization schedule'),
+      );
+    }
+
+    final displayRows = monthlyView
+        ? rows
+        : () {
+            final map = <int, _EmiSchedulePoint>{};
+            for (final r in rows) {
+              map[r.year] = r;
+            }
+            return map.values.toList(growable: false);
+          }();
+
+    Widget cell(String text, {TextAlign align = TextAlign.left}) => Expanded(
+          child: Text(
+            text,
+            textAlign: align,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
+            ),
+          ),
+        );
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              cell(monthlyView ? 'Month' : 'Year'),
+              cell('Principal', align: TextAlign.right),
+              cell('Interest', align: TextAlign.right),
+              cell('Balance', align: TextAlign.right),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Divider(height: 1),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 220,
+            child: ListView.separated(
+              itemCount: displayRows.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 6),
+              itemBuilder: (_, index) {
+                final row = displayRows[index];
+                return Row(
+                  children: [
+                    cell('${monthlyView ? row.month : row.year}'),
+                    cell(money(row.principalPaid), align: TextAlign.right),
+                    cell(money(row.interestPaid), align: TextAlign.right),
+                    cell(money(row.balance), align: TextAlign.right),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -768,11 +1306,11 @@ class _SipLineChartPainter extends CustomPainter {
       ..strokeWidth = 2.5
       ..style = PaintingStyle.stroke;
 
-    final left = 16.0;
+    const left = 16.0;
     final bottom = size.height - 16;
-    final top = 8.0;
+    const top = 8.0;
     final right = size.width - 8;
-    canvas.drawLine(Offset(left, top), Offset(left, bottom), axisPaint);
+    canvas.drawLine(const Offset(left, top), Offset(left, bottom), axisPaint);
     canvas.drawLine(Offset(left, bottom), Offset(right, bottom), axisPaint);
     if (points.length < 2) return;
 
@@ -800,7 +1338,8 @@ class _SipLineChartPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _SipLineChartPainter oldDelegate) => oldDelegate.points != points;
+  bool shouldRepaint(covariant _SipLineChartPainter oldDelegate) =>
+      oldDelegate.points != points;
 }
 
 class _PieSlice {
@@ -886,7 +1425,8 @@ class _PieChartPainter extends CustomPainter {
       final paint = Paint()
         ..color = slice.color
         ..style = PaintingStyle.fill;
-      canvas.drawArc(Rect.fromCircle(center: center, radius: radius), start, sweep, true, paint);
+      canvas.drawArc(Rect.fromCircle(center: center, radius: radius), start,
+          sweep, true, paint);
       start += sweep;
     }
     final holePaint = Paint()
@@ -896,5 +1436,6 @@ class _PieChartPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _PieChartPainter oldDelegate) => oldDelegate.slices != slices;
+  bool shouldRepaint(covariant _PieChartPainter oldDelegate) =>
+      oldDelegate.slices != slices;
 }

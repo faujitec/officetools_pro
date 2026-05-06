@@ -8,8 +8,42 @@ import 'package:office_toolspro/services/file_store.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
 import 'package:share_plus/share_plus.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final ScrollController _scrollController = ScrollController();
+  bool _showTopBanner = true;
+  static const double _switchDownOffset = 260;
+  static const double _switchUpOffset = 160;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    final offset = _scrollController.offset;
+    // Hysteresis to prevent flicker while user hovers near threshold.
+    final nextShowTop =
+        _showTopBanner ? offset < _switchDownOffset : offset <= _switchUpOffset;
+    if (nextShowTop != _showTopBanner) {
+      setState(() => _showTopBanner = nextShowTop);
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -18,8 +52,12 @@ class HomeScreen extends StatelessWidget {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       drawer: const _AppDrawer(),
       appBar: AppBar(
-        backgroundColor: isDark ? Theme.of(context).scaffoldBackgroundColor : const Color(0xFFFFFFFF),
-        surfaceTintColor: isDark ? Theme.of(context).scaffoldBackgroundColor : const Color(0xFFFFFFFF),
+        backgroundColor: isDark
+            ? Theme.of(context).scaffoldBackgroundColor
+            : const Color(0xFFFFFFFF),
+        surfaceTintColor: isDark
+            ? Theme.of(context).scaffoldBackgroundColor
+            : const Color(0xFFFFFFFF),
         elevation: 0,
         centerTitle: false,
         titleSpacing: 0,
@@ -44,12 +82,23 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
       body: SingleChildScrollView(
+        controller: _scrollController,
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const InlineBannerAd(),
-            const SizedBox(height: 12),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              child: _showTopBanner
+                  ? const Column(
+                      key: ValueKey('top-banner'),
+                      children: [
+                        InlineBannerAd(),
+                        SizedBox(height: 12),
+                      ],
+                    )
+                  : const SizedBox.shrink(key: ValueKey('top-banner-hidden')),
+            ),
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -66,6 +115,18 @@ class HomeScreen extends StatelessWidget {
               },
             ),
             const SizedBox(height: 10),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              child: !_showTopBanner
+                  ? const Column(
+                      key: ValueKey('mid-banner'),
+                      children: [
+                        InlineBannerAd(),
+                        SizedBox(height: 10),
+                      ],
+                    )
+                  : const SizedBox.shrink(key: ValueKey('mid-banner-hidden')),
+            ),
             _RecentFilesSection(
               onOpenAll: () => Navigator.pushNamed(context, '/my-files'),
             ),
@@ -187,7 +248,7 @@ class _RecentFilesSection extends StatelessWidget {
     return ValueListenableBuilder<List<FileItem>>(
       valueListenable: FileStore.files,
       builder: (context, files, _) {
-        final recent = files.take(4).toList(growable: false);
+        final recent = files.take(8).toList(growable: false);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -213,167 +274,189 @@ class _RecentFilesSection extends StatelessWidget {
                   color: isDark ? const Color(0xFF1E293B) : Colors.white,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: isDark ? const Color(0xFF334155) : const Color(0xFFE7EBF2),
+                    color: isDark
+                        ? const Color(0xFF334155)
+                        : const Color(0xFFE7EBF2),
                   ),
                 ),
                 child: Text(
                   'No recent files yet.',
                   style: TextStyle(
-                    color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF64748B),
+                    color: isDark
+                        ? const Color(0xFFCBD5E1)
+                        : const Color(0xFF64748B),
                   ),
                 ),
               )
             else
-              ...recent.map(
-                (file) => Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(14),
-                    onTap: () async {
-                      final path = file.path;
-                      if (path == null || path.isEmpty) {
+              ...recent.map((file) => Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () async {
+                        final path = file.path;
+                        if (path == null || path.isEmpty) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    'This item has no file path to open.')),
+                          );
+                          return;
+                        }
                         if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('This item has no file path to open.')),
+                        final open = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Open file'),
+                            content: Text('Open "${file.name}"?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('Open'),
+                              ),
+                            ],
+                          ),
                         );
-                        return;
-                      }
-                      if (!context.mounted) return;
-                      final open = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Open file'),
-                          content: Text('Open "${file.name}"?'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('Cancel'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(ctx, true),
-                              child: const Text('Open'),
-                            ),
-                          ],
+                        if (open == true && context.mounted) {
+                          await OpenFilex.open(path);
+                        }
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color:
+                              isDark ? const Color(0xFF1E293B) : Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: isDark
+                                ? const Color(0xFF334155)
+                                : const Color(0xFFE7EBF2),
+                          ),
                         ),
-                      );
-                      if (open == true && context.mounted) {
-                        await OpenFilex.open(path);
-                      }
-                    },
-                    child: Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: isDark ? const Color(0xFF334155) : const Color(0xFFE7EBF2),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(_iconForType(file.type), color: const Color(0xFF1857E6)),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Row(
                           children: [
-                            Text(
-                              file.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                fontWeight: FontWeight.w700,
+                            Icon(_iconForType(file.type),
+                                color: const Color(0xFF1857E6)),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    file.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white
+                                          : const Color(0xFF0F172A),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${file.type.name.toUpperCase()} • ${file.date}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? const Color(0xFF94A3B8)
+                                          : const Color(0xFF64748B),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            Text(
-                              '${file.type.name.toUpperCase()} • ${file.date}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                                fontSize: 12,
+                            PopupMenuButton<String>(
+                              tooltip: 'Actions',
+                              position: PopupMenuPosition.under,
+                              offset: const Offset(-12, 4),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(
+                                  color: isDark
+                                      ? const Color(0xFF334155)
+                                      : const Color(0xFFE7EBF2),
+                                ),
                               ),
+                              color: isDark
+                                  ? const Color(0xFF1E293B)
+                                  : Colors.white,
+                              elevation: 8,
+                              shadowColor: const Color(0xFF111827)
+                                  .withValues(alpha: 0.12),
+                              icon: Icon(
+                                Icons.more_horiz_rounded,
+                                color: isDark
+                                    ? const Color(0xFF94A3B8)
+                                    : const Color(0xFF64748B),
+                              ),
+                              onSelected: (value) async {
+                                if (value == 'open') {
+                                  await _openFile(context, file);
+                                } else if (value == 'share') {
+                                  await _shareFile(context, file);
+                                } else if (value == 'copy') {
+                                  await _copyPath(context, file);
+                                } else if (value == 'remove') {
+                                  FileStore.removeById(file.id);
+                                }
+                              },
+                              itemBuilder: (ctx) => [
+                                PopupMenuItem(
+                                  value: 'open',
+                                  enabled: file.path != null &&
+                                      file.path!.isNotEmpty,
+                                  child: _RecentFileMenuRow(
+                                    icon: Icons.open_in_new_rounded,
+                                    label: 'Open',
+                                    iconColor: const Color(0xFF1857E6),
+                                    isDark: isDark,
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'share',
+                                  child: _RecentFileMenuRow(
+                                    icon: Icons.share_outlined,
+                                    label: 'Share',
+                                    iconColor: const Color(0xFF1857E6),
+                                    isDark: isDark,
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'copy',
+                                  enabled: file.path != null &&
+                                      file.path!.isNotEmpty,
+                                  child: _RecentFileMenuRow(
+                                    icon: Icons.link_rounded,
+                                    label: 'Copy path',
+                                    iconColor: const Color(0xFF1857E6),
+                                    isDark: isDark,
+                                  ),
+                                ),
+                                const PopupMenuDivider(height: 1),
+                                PopupMenuItem(
+                                  value: 'remove',
+                                  child: _RecentFileMenuRow(
+                                    icon: Icons.delete_outline_rounded,
+                                    label: 'Remove',
+                                    iconColor: const Color(0xFFDC2626),
+                                    isDark: isDark,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
                       ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Actions',
-                        position: PopupMenuPosition.under,
-                        offset: const Offset(-12, 4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(
-                            color: isDark ? const Color(0xFF334155) : const Color(0xFFE7EBF2),
-                          ),
-                        ),
-                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                        elevation: 8,
-                        shadowColor: const Color(0xFF111827).withValues(alpha: 0.12),
-                        icon: Icon(
-                          Icons.more_horiz_rounded,
-                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                        ),
-                        onSelected: (value) async {
-                          if (value == 'open') {
-                            await _openFile(context, file);
-                          } else if (value == 'share') {
-                            await _shareFile(context, file);
-                          } else if (value == 'copy') {
-                            await _copyPath(context, file);
-                          } else if (value == 'remove') {
-                            FileStore.removeById(file.id);
-                          }
-                        },
-                        itemBuilder: (ctx) => [
-                          PopupMenuItem(
-                            value: 'open',
-                            enabled: file.path != null && file.path!.isNotEmpty,
-                            child: _RecentFileMenuRow(
-                              icon: Icons.open_in_new_rounded,
-                              label: 'Open',
-                              iconColor: const Color(0xFF1857E6),
-                              isDark: isDark,
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: 'share',
-                            child: _RecentFileMenuRow(
-                              icon: Icons.share_outlined,
-                              label: 'Share',
-                              iconColor: const Color(0xFF1857E6),
-                              isDark: isDark,
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: 'copy',
-                            enabled: file.path != null && file.path!.isNotEmpty,
-                            child: _RecentFileMenuRow(
-                              icon: Icons.link_rounded,
-                              label: 'Copy path',
-                              iconColor: const Color(0xFF1857E6),
-                              isDark: isDark,
-                            ),
-                          ),
-                          const PopupMenuDivider(height: 1),
-                          PopupMenuItem(
-                            value: 'remove',
-                            child: _RecentFileMenuRow(
-                              icon: Icons.delete_outline_rounded,
-                              label: 'Remove',
-                              iconColor: const Color(0xFFDC2626),
-                              isDark: isDark,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
                     ),
-                  ),
-                )),
+                  )),
           ],
         );
       },
@@ -420,7 +503,8 @@ class _AppDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Drawer(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      backgroundColor:
+          isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       surfaceTintColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.horizontal(right: Radius.circular(20)),
@@ -439,8 +523,7 @@ class _AppDrawer extends StatelessWidget {
                   MaterialPageRoute<void>(
                     builder: (_) => const _InfoPage(
                       title: 'Privacy Policy',
-                      content:
-                          'Privacy Policy (Last updated: 29 Apr 2026)\n\n'
+                      content: 'Privacy Policy (Last updated: 29 Apr 2026)\n\n'
                           '1) What we process:\n'
                           'OfficeTools Pro processes only files you explicitly select. Many operations run on-device, while optional features (OCR, remove background, some conversions) may send content to selected third-party APIs.\n\n'
                           '2) Data handling:\n'
@@ -489,7 +572,7 @@ class _AppDrawer extends StatelessWidget {
                       title: 'About This App',
                       content:
                           'OfficeTools Pro is an all-in-one productivity utility for everyday document and image workflows.\n\n'
-                          'You can scan documents with OCR, convert between common formats, merge/split/rearrange PDFs, rotate or delete pages, compress files, and run image tools like resize, crop, format conversion, and background removal.\n\n'
+                          'You can scan documents with OCR, convert between common formats, merge/split/rearrange PDFs, rotate or delete pages, and run image tools like resize, crop, format conversion, compression, and background removal.\n\n'
                           'The app also includes file management actions so you can preview, open, and share processed outputs quickly from one place.\n\n'
                           'Some advanced features use cloud APIs (for example OCR or certain conversions), while many tools run locally on-device. For best privacy, avoid uploading sensitive files unless you trust the configured service providers.',
                     ),
@@ -507,18 +590,22 @@ class _AppDrawer extends StatelessWidget {
                     color: isDark ? const Color(0xFF1E293B) : Colors.white,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: isDark ? const Color(0xFF334155) : const Color(0xFFE7EBF2),
+                      color: isDark
+                          ? const Color(0xFF334155)
+                          : const Color(0xFFE7EBF2),
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF111827).withValues(alpha: isDark ? 0.2 : 0.05),
+                        color: const Color(0xFF111827)
+                            .withValues(alpha: isDark ? 0.2 : 0.05),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
                     ],
                   ),
                   child: SwitchListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
@@ -529,7 +616,9 @@ class _AppDrawer extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
-                        isDarkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                        isDarkMode
+                            ? Icons.dark_mode_rounded
+                            : Icons.light_mode_rounded,
                         color: const Color(0xFF1857E6),
                         size: 22,
                       ),
@@ -582,7 +671,8 @@ class _DrawerActionTile extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF111827).withValues(alpha: isDark ? 0.2 : 0.05),
+            color:
+                const Color(0xFF111827).withValues(alpha: isDark ? 0.2 : 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -629,9 +719,20 @@ class _InfoPage extends StatelessWidget {
       appBar: AppBar(title: Text(title)),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: Text(
-          content,
-          style: const TextStyle(fontSize: 15, height: 1.45),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const InlineBannerAd(),
+            const SizedBox(height: 12),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Text(
+                  content,
+                  style: const TextStyle(fontSize: 15, height: 1.45),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

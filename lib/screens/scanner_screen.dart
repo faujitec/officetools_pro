@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:office_toolspro/models/file_item.dart';
 import 'package:office_toolspro/services/file_store.dart';
@@ -15,7 +17,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:permission_handler/permission_handler.dart';
 
 enum _ScanStage { capture, edit, filter, review }
-enum _PageFilter { original, bw, grayscale, enhance }
+
+enum _PageFilter { original, magicWhite, bw, grayscale, enhance }
 
 class _ScanPage {
   final Uint8List bytes;
@@ -41,6 +44,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
   Uint8List? _captured;
   Uint8List? _cropped;
   _PageFilter _activeFilter = _PageFilter.original;
+  double _brightness = 0.0;
+  double _contrast = 1.0;
+  Uint8List? _filterPreviewBytes;
+  bool _filterPreviewUpdating = false;
+  int _filterPreviewToken = 0;
+  Timer? _adjustPreviewDebounce;
   final List<_ScanPage> _pages = [];
 
   List<Offset> _corners = const [
@@ -49,7 +58,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     Offset(0.92, 0.92),
     Offset(0.08, 0.92),
   ];
-  int? _dragCorner;
+  int? _dragHandle;
   int _reviewPageIndex = 0;
   PageController? _reviewPageController;
 
@@ -59,6 +68,26 @@ class _ScannerScreenState extends State<ScannerScreen> {
         Offset(0.92, 0.92),
         Offset(0.08, 0.92),
       ];
+
+  ({double left, double top, double right, double bottom}) _rectFromCorners() {
+    final xs = _corners.map((p) => p.dx).toList()..sort();
+    final ys = _corners.map((p) => p.dy).toList()..sort();
+    return (left: xs.first, top: ys.first, right: xs.last, bottom: ys.last);
+  }
+
+  void _setRectToCorners({
+    required double left,
+    required double top,
+    required double right,
+    required double bottom,
+  }) {
+    _corners = [
+      Offset(left, top),
+      Offset(right, top),
+      Offset(right, bottom),
+      Offset(left, bottom),
+    ];
+  }
 
   /// Rough document bounds on light backgrounds (non-white pixels → bbox).
   List<Offset> _autoDocumentCornersNormalized(img.Image source) {
@@ -76,10 +105,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
       for (var x = 0; x < w; x++) {
         final l = gray.getPixel(x, y).r.toInt();
         if (l < thresh) {
-          minX = minX == null ? x : math.min(minX as int, x);
-          maxX = maxX == null ? x : math.max(maxX as int, x);
-          minY = minY == null ? y : math.min(minY as int, y);
-          maxY = maxY == null ? y : math.max(maxY as int, y);
+          minX = minX == null ? x : math.min(minX, x);
+          maxX = maxX == null ? x : math.max(maxX, x);
+          minY = minY == null ? y : math.min(minY, y);
+          maxY = maxY == null ? y : math.max(maxY, y);
         }
       }
     }
@@ -116,6 +145,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
   void dispose() {
     _camera?.dispose();
     _reviewPageController?.dispose();
+    _adjustPreviewDebounce?.cancel();
     super.dispose();
   }
 
@@ -149,28 +179,75 @@ class _ScannerScreenState extends State<ScannerScreen> {
     try {
       final x = await _camera!.takePicture();
       final bytes = await x.readAsBytes();
-      if (!mounted) return;
-      final decoded = img.decodeImage(bytes);
-      final corners =
-          decoded != null ? _autoDocumentCornersNormalized(decoded) : _defaultCorners();
-      if (!mounted) return;
-      setState(() {
-        _captured = bytes;
-        _cropped = bytes;
-        _corners = corners;
-        _stage = _ScanStage.edit;
-      });
+      await _openForEdit(bytes);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Uint8List _applyFilter(Uint8List source, _PageFilter filter) {
+  Future<void> _openForEdit(Uint8List bytes) async {
+    if (!mounted) return;
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content:
+                Text('Could not read this image. Please try another one.')),
+      );
+      return;
+    }
+    final normalized = Uint8List.fromList(img.encodeJpg(decoded, quality: 95));
+    final corners = _autoDocumentCornersNormalized(decoded);
+    setState(() {
+      _captured = normalized;
+      _cropped = normalized;
+      _corners = corners;
+      _activeFilter = _PageFilter.original;
+      _brightness = 0.0;
+      _contrast = 1.0;
+      _filterPreviewBytes = null;
+      _filterPreviewUpdating = false;
+      _stage = _ScanStage.edit;
+    });
+  }
+
+  Future<void> _pickFromGallery() async {
+    if (_busy) return;
+    final picker = ImagePicker();
+    final picked =
+        await picker.pickImage(source: ImageSource.gallery, imageQuality: 95);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    await _openForEdit(bytes);
+  }
+
+  void _rotateCaptured({required bool clockwise}) {
+    if (_captured == null) return;
+    final decoded = img.decodeImage(_captured!);
+    if (decoded == null) return;
+    final rotated = img.copyRotate(decoded, angle: clockwise ? 90 : -90);
+    setState(() {
+      _captured = Uint8List.fromList(img.encodeJpg(rotated, quality: 95));
+      _cropped = _captured;
+      _corners = _autoDocumentCornersNormalized(rotated);
+    });
+  }
+
+  Uint8List _applyFilter(
+    Uint8List source,
+    _PageFilter filter, {
+    required double brightness,
+    required double contrast,
+  }) {
     final decoded = img.decodeImage(source);
     if (decoded == null) return source;
     img.Image processed = img.Image.from(decoded);
     switch (filter) {
       case _PageFilter.original:
+        break;
+      case _PageFilter.magicWhite:
+        processed = img.grayscale(processed);
+        processed = img.adjustColor(processed, contrast: 2.2, brightness: 1.2);
         break;
       case _PageFilter.bw:
         processed = img.grayscale(processed);
@@ -180,11 +257,45 @@ class _ScannerScreenState extends State<ScannerScreen> {
         processed = img.grayscale(processed);
         break;
       case _PageFilter.enhance:
-        processed = img.contrast(processed, contrast: 170);
-        processed = img.adjustColor(processed, saturation: 1.08, brightness: 1.03);
+        // Gentle enhancement to avoid overly dark outputs on low-light captures.
+        processed = img.adjustColor(
+          processed,
+          contrast: 1.12,
+          brightness: 1.06,
+          saturation: 1.03,
+        );
         break;
     }
+    final b = (1.0 + brightness).clamp(0.6, 1.6);
+    final c = contrast.clamp(0.6, 1.8);
+    processed = img.adjustColor(processed, brightness: b, contrast: c);
     return Uint8List.fromList(img.encodeJpg(processed, quality: 92));
+  }
+
+  void _scheduleFilterPreviewUpdate() {
+    _adjustPreviewDebounce?.cancel();
+    _adjustPreviewDebounce = Timer(const Duration(milliseconds: 24), () {
+      final source = _cropped;
+      if (source == null) return;
+      final filter = _activeFilter;
+      final brightness = _brightness;
+      final contrast = _contrast;
+      final token = ++_filterPreviewToken;
+      if (mounted) setState(() => _filterPreviewUpdating = true);
+      Future<void>(() {
+        final bytes = _applyFilter(
+          source,
+          filter,
+          brightness: brightness,
+          contrast: contrast,
+        );
+        if (!mounted || token != _filterPreviewToken) return;
+        setState(() {
+          _filterPreviewBytes = bytes;
+          _filterPreviewUpdating = false;
+        });
+      });
+    });
   }
 
   void _cropWithCorners() {
@@ -201,17 +312,22 @@ class _ScannerScreenState extends State<ScannerScreen> {
     final output = _boundingCrop(decoded);
     setState(() {
       _cropped = Uint8List.fromList(img.encodeJpg(output, quality: 95));
+      _filterPreviewBytes = null;
       _stage = _ScanStage.filter;
     });
+    _scheduleFilterPreviewUpdate();
   }
 
   img.Image _boundingCrop(img.Image decoded) {
     final xs = _corners.map((p) => p.dx).toList()..sort();
     final ys = _corners.map((p) => p.dy).toList()..sort();
     final left = (xs.first * decoded.width).clamp(0, decoded.width - 1).toInt();
-    final top = (ys.first * decoded.height).clamp(0, decoded.height - 1).toInt();
-    final right = (xs.last * decoded.width).clamp(left + 1, decoded.width).toInt();
-    final bottom = (ys.last * decoded.height).clamp(top + 1, decoded.height).toInt();
+    final top =
+        (ys.first * decoded.height).clamp(0, decoded.height - 1).toInt();
+    final right =
+        (xs.last * decoded.width).clamp(left + 1, decoded.width).toInt();
+    final bottom =
+        (ys.last * decoded.height).clamp(top + 1, decoded.height).toInt();
     return img.copyCrop(
       decoded,
       x: left,
@@ -226,6 +342,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
       _captured = null;
       _cropped = null;
       _activeFilter = _PageFilter.original;
+      _brightness = 0.0;
+      _contrast = 1.0;
       _stage = _ScanStage.capture;
     });
   }
@@ -234,15 +352,22 @@ class _ScannerScreenState extends State<ScannerScreen> {
     if (_cropped == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nothing to add. Capture and crop a page first.')),
+        const SnackBar(
+            content: Text('Nothing to add. Capture and crop a page first.')),
       );
       return;
     }
-    final filtered = _applyFilter(_cropped!, _activeFilter);
+    final filtered = _applyFilter(
+      _cropped!,
+      _activeFilter,
+      brightness: _brightness,
+      contrast: _contrast,
+    );
     if (filtered.length < 32) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Page image is empty. Go back and crop again.')),
+        const SnackBar(
+            content: Text('Page image is empty. Go back and crop again.')),
       );
       return;
     }
@@ -251,6 +376,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
       _captured = null;
       _cropped = null;
       _activeFilter = _PageFilter.original;
+      _brightness = 0.0;
+      _contrast = 1.0;
       _reviewPageIndex = _pages.length - 1;
       _stage = goToCaptureAfter ? _ScanStage.capture : _ScanStage.review;
     });
@@ -283,7 +410,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
           decoration: const InputDecoration(labelText: 'Document name'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel')),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(nameController.text.trim()),
             child: const Text('Save'),
@@ -295,12 +424,20 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
     final doc = pw.Document();
     for (final page in _pages) {
+      final decoded = img.decodeImage(page.bytes);
+      if (decoded == null) continue;
       final mem = pw.MemoryImage(page.bytes);
       doc.addPage(
         pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          build: (_) => pw.Center(
-            child: pw.Image(mem, fit: pw.BoxFit.contain),
+          pageTheme: pw.PageTheme(
+            pageFormat: PdfPageFormat(
+              decoded.width.toDouble(),
+              decoded.height.toDouble(),
+            ),
+            margin: pw.EdgeInsets.zero,
+          ),
+          build: (_) => pw.SizedBox.expand(
+            child: pw.Image(mem, fit: pw.BoxFit.fill),
           ),
         ),
       );
@@ -308,7 +445,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
     final bytes = await doc.save();
     final dir = await getApplicationDocumentsDirectory();
     final ts = DateTime.now().millisecondsSinceEpoch;
-    final fileName = '${name.replaceAll(RegExp(r'[^a-zA-Z0-9_\- ]'), '').trim().replaceAll(' ', '_')}_$ts.pdf';
+    final fileName =
+        '${name.replaceAll(RegExp(r'[^a-zA-Z0-9_\- ]'), '').trim().replaceAll(' ', '_')}_$ts.pdf';
     final path = '${dir.path}/$fileName';
     await File(path).writeAsBytes(bytes, flush: true);
 
@@ -376,7 +514,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
               child: CircleAvatar(
                 backgroundColor: Colors.black54,
                 child: IconButton(
-                  icon: Icon(_flashOn ? Icons.flash_on : Icons.flash_off, color: Colors.white),
+                  icon: Icon(_flashOn ? Icons.flash_on : Icons.flash_off,
+                      color: Colors.white),
                   onPressed: _toggleFlash,
                 ),
               ),
@@ -385,29 +524,67 @@ class _ScannerScreenState extends State<ScannerScreen> {
               bottom: 28,
               left: 0,
               right: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: _capture,
-                  child: Container(
-                    width: 78,
-                    height: 78,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 4),
-                    ),
-                    child: Container(
-                      margin: const EdgeInsets.all(10),
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 22),
+                      child: _sourceAction(
+                        icon: Icons.photo_library_outlined,
+                        label: 'Upload',
+                        onTap: _pickFromGallery,
                       ),
                     ),
                   ),
-                ),
+                  GestureDetector(
+                    onTap: _capture,
+                    child: Container(
+                      width: 78,
+                      height: 78,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 4),
+                      ),
+                      child: Container(
+                        margin: const EdgeInsets.all(10),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _sourceAction({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircleAvatar(
+            radius: 22,
+            backgroundColor: Colors.black54,
+            child: Icon(icon, color: Colors.white),
+          ),
+          const SizedBox(height: 6),
+          Text(label,
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.w600)),
+        ],
       ),
     );
   }
@@ -424,11 +601,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
               final decoded = img.decodeImage(data);
               if (decoded == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Could not auto-detect edges on this photo.')),
+                  const SnackBar(
+                      content:
+                          Text('Could not auto-detect edges on this photo.')),
                 );
                 return;
               }
-              setState(() => _corners = _autoDocumentCornersNormalized(decoded));
+              setState(
+                  () => _corners = _autoDocumentCornersNormalized(decoded));
             },
             icon: const Icon(Icons.auto_fix_high_outlined),
             label: const Text('Auto edges'),
@@ -447,18 +627,31 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 final imageSize = decoded == null
                     ? Size(c.maxWidth, c.maxHeight)
                     : Size(decoded.width.toDouble(), decoded.height.toDouble());
-                final imageRect = _containRect(Size(c.maxWidth, c.maxHeight), imageSize);
-                final hit = math.max(48.0, MediaQuery.of(context).size.shortestSide * 0.09);
+                final imageRect =
+                    _containRect(Size(c.maxWidth, c.maxHeight), imageSize);
+                final hit = math.max(
+                    48.0, MediaQuery.of(context).size.shortestSide * 0.09);
                 return GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onPanStart: (d) {
                     final local = d.localPosition;
+                    final r = _rectFromCorners();
+                    final handles = <Offset>[
+                      Offset(r.left, r.top),
+                      Offset(r.right, r.top),
+                      Offset(r.right, r.bottom),
+                      Offset(r.left, r.bottom),
+                      Offset((r.left + r.right) / 2, r.top),
+                      Offset(r.right, (r.top + r.bottom) / 2),
+                      Offset((r.left + r.right) / 2, r.bottom),
+                      Offset(r.left, (r.top + r.bottom) / 2),
+                    ];
                     double best = 100000;
                     int idx = 0;
-                    for (int i = 0; i < _corners.length; i++) {
+                    for (int i = 0; i < handles.length; i++) {
                       final p = Offset(
-                        imageRect.left + (_corners[i].dx * imageRect.width),
-                        imageRect.top + (_corners[i].dy * imageRect.height),
+                        imageRect.left + (handles[i].dx * imageRect.width),
+                        imageRect.top + (handles[i].dy * imageRect.height),
                       );
                       final dist = (p - local).distance;
                       if (dist < best) {
@@ -468,26 +661,89 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     }
                     final use = best <= hit;
                     setState(() {
-                      _dragCorner = use ? idx : null;
+                      _dragHandle = use ? idx : null;
                     });
                   },
                   onPanUpdate: (d) {
-                    if (_dragCorner == null) return;
-                    final nx = ((d.localPosition.dx - imageRect.left) / imageRect.width).clamp(0.02, 0.98);
-                    final ny = ((d.localPosition.dy - imageRect.top) / imageRect.height).clamp(0.02, 0.98);
+                    if (_dragHandle == null) return;
+                    final nx = ((d.localPosition.dx - imageRect.left) /
+                            imageRect.width)
+                        .clamp(0.02, 0.98);
+                    final ny = ((d.localPosition.dy - imageRect.top) /
+                            imageRect.height)
+                        .clamp(0.02, 0.98);
                     setState(() {
-                      _corners[_dragCorner!] = Offset(nx, ny);
+                      final r = _rectFromCorners();
+                      double left = r.left;
+                      double right = r.right;
+                      double top = r.top;
+                      double bottom = r.bottom;
+                      switch (_dragHandle!) {
+                        case 0:
+                          left = nx;
+                          top = ny;
+                          break;
+                        case 1:
+                          right = nx;
+                          top = ny;
+                          break;
+                        case 2:
+                          right = nx;
+                          bottom = ny;
+                          break;
+                        case 3:
+                          left = nx;
+                          bottom = ny;
+                          break;
+                        case 4:
+                          top = ny;
+                          break;
+                        case 5:
+                          right = nx;
+                          break;
+                        case 6:
+                          bottom = ny;
+                          break;
+                        case 7:
+                          left = nx;
+                          break;
+                      }
+                      if (right - left < 0.04) {
+                        if (_dragHandle == 0 ||
+                            _dragHandle == 3 ||
+                            _dragHandle == 7) {
+                          left = right - 0.04;
+                        } else {
+                          right = left + 0.04;
+                        }
+                      }
+                      if (bottom - top < 0.04) {
+                        if (_dragHandle == 0 ||
+                            _dragHandle == 1 ||
+                            _dragHandle == 4) {
+                          top = bottom - 0.04;
+                        } else {
+                          bottom = top + 0.04;
+                        }
+                      }
+                      _setRectToCorners(
+                        left: left.clamp(0.02, 0.98),
+                        top: top.clamp(0.02, 0.98),
+                        right: right.clamp(0.02, 0.98),
+                        bottom: bottom.clamp(0.02, 0.98),
+                      );
                     });
                   },
                   onPanEnd: (_) {
-                    setState(() => _dragCorner = null);
+                    setState(() => _dragHandle = null);
                   },
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
                       Image.memory(data, fit: BoxFit.contain),
                       CustomPaint(
-                        painter: _CornersPainter(corners: _corners, imageRect: imageRect),
+                        painter: _CornersPainter(
+                            corners: _corners, imageRect: imageRect),
                       ),
                     ],
                   ),
@@ -502,27 +758,51 @@ class _ScannerScreenState extends State<ScannerScreen> {
               12,
               16 + MediaQuery.of(context).padding.bottom,
             ),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _retake,
-                    child: const Text('Retake'),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _rotateCaptured(clockwise: false),
+                        icon: const Icon(Icons.rotate_left),
+                        label: const Text('Rotate Left'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _rotateCaptured(clockwise: true),
+                        icon: const Icon(Icons.rotate_right),
+                        label: const Text('Rotate Right'),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _cropWithCorners,
-                    child: const Text('Crop'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.tonal(
-                    onPressed: _cropWithCorners,
-                    child: const Text('Continue'),
-                  ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _retake,
+                        child: const Text('Retake'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _cropWithCorners,
+                        child: const Text('Crop'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.tonal(
+                        onPressed: _cropWithCorners,
+                        child: const Text('Continue'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -535,7 +815,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
   Widget _buildFilter() {
     final data = _cropped;
     if (data == null) return const SizedBox.shrink();
-    final preview = _applyFilter(data, _activeFilter);
+    final preview = _filterPreviewBytes ?? data;
     return Scaffold(
       appBar: AppBar(title: const Text('Apply Filter')),
       body: Column(
@@ -547,16 +827,52 @@ class _ScannerScreenState extends State<ScannerScreen> {
             child: Container(
               width: double.infinity,
               color: Colors.black,
-              child: Image.memory(preview, fit: BoxFit.contain),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Image.memory(
+                      preview,
+                      fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                    ),
+                  ),
+                  if (_filterPreviewUpdating)
+                    const Positioned(
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      child: LinearProgressIndicator(minHeight: 2),
+                    ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                const Text(
+                  'This filter applies to current page',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _openAdjustSheet,
+                  icon: const Icon(Icons.tune),
+                  label: const Text('Adjust'),
+                ),
+              ],
+            ),
+          ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
                 _filterChip('Original', _PageFilter.original),
+                _filterChip('Magic White', _PageFilter.magicWhite),
                 _filterChip('B & W', _PageFilter.bw),
                 _filterChip('Grayscale', _PageFilter.grayscale),
                 _filterChip('Enhance', _PageFilter.enhance),
@@ -581,7 +897,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton(
-                    onPressed: () => _commitScannedPage(goToCaptureAfter: false),
+                    onPressed: () =>
+                        _commitScannedPage(goToCaptureAfter: false),
                     child: const Text('Review'),
                   ),
                 ),
@@ -594,13 +911,128 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 
   Widget _filterChip(String label, _PageFilter value) {
+    final selected = _activeFilter == value;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: ChoiceChip(
-        label: Text(label),
-        selected: _activeFilter == value,
-        onSelected: (_) => setState(() => _activeFilter = value),
+        label: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : const Color(0xFF0F172A),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        selectedColor: const Color(0xFF1857E6),
+        backgroundColor: const Color(0xFFF1F5F9),
+        selected: selected,
+        onSelected: (_) {
+          setState(() => _activeFilter = value);
+          _scheduleFilterPreviewUpdate();
+        },
       ),
+    );
+  }
+
+  Future<void> _openAdjustSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'Adjust',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 16),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _brightness = 0.0;
+                              _contrast = 1.0;
+                            });
+                            setSheetState(() {});
+                            _scheduleFilterPreviewUpdate();
+                          },
+                          child: const Text('Reset'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const SizedBox(
+                            width: 88,
+                            child: Text(
+                              'Brightness',
+                              style: TextStyle(color: Color(0xFF0F172A)),
+                            )),
+                        Expanded(
+                          child: Slider(
+                            min: -0.55,
+                            max: 0.55,
+                            value: _brightness,
+                            onChanged: (v) {
+                              setState(() => _brightness = v);
+                              setSheetState(() {});
+                              _scheduleFilterPreviewUpdate();
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          width: 44,
+                          child: Text(
+                            (_brightness * 100).toStringAsFixed(0),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        const SizedBox(
+                            width: 88,
+                            child: Text(
+                              'Contrast',
+                              style: TextStyle(color: Color(0xFF0F172A)),
+                            )),
+                        Expanded(
+                          child: Slider(
+                            min: 0.5,
+                            max: 1.9,
+                            value: _contrast,
+                            onChanged: (v) {
+                              setState(() => _contrast = v);
+                              setSheetState(() {});
+                              _scheduleFilterPreviewUpdate();
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          width: 44,
+                          child: Text(
+                            _contrast.toStringAsFixed(2),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -616,12 +1048,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
             padding: const EdgeInsets.all(12),
             child: Row(
               children: [
-                Text('Pages: ${_pages.length}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text('Pages: ${_pages.length}',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
                 const Spacer(),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 170),
                   child: OutlinedButton.icon(
-                    onPressed: () => setState(() => _stage = _ScanStage.capture),
+                    onPressed: () =>
+                        setState(() => _stage = _ScanStage.capture),
                     icon: const Icon(Icons.add),
                     label: const Text('Add Page'),
                   ),
@@ -637,7 +1071,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.layers_outlined, size: 56, color: Colors.grey.shade400),
+                          Icon(Icons.layers_outlined,
+                              size: 56, color: Colors.grey.shade400),
                           const SizedBox(height: 12),
                           Text(
                             'No pages yet',
@@ -651,11 +1086,13 @@ class _ScannerScreenState extends State<ScannerScreen> {
                           Text(
                             'Capture a page, apply a filter, then tap Review or Add Page.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey.shade600, height: 1.35),
+                            style: TextStyle(
+                                color: Colors.grey.shade600, height: 1.35),
                           ),
                           const SizedBox(height: 20),
                           FilledButton.icon(
-                            onPressed: () => setState(() => _stage = _ScanStage.capture),
+                            onPressed: () =>
+                                setState(() => _stage = _ScanStage.capture),
                             icon: const Icon(Icons.camera_alt_outlined),
                             label: const Text('Start scanning'),
                           ),
@@ -676,11 +1113,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(16),
                             child: PageView.builder(
-                              controller: _reviewPageController ??= PageController(
-                                initialPage: _reviewPageIndex.clamp(0, _pages.length - 1),
+                              controller: _reviewPageController ??=
+                                  PageController(
+                                initialPage: _reviewPageIndex.clamp(
+                                    0, _pages.length - 1),
                               ),
                               itemCount: _pages.length,
-                              onPageChanged: (i) => setState(() => _reviewPageIndex = i),
+                              onPageChanged: (i) =>
+                                  setState(() => _reviewPageIndex = i),
                               itemBuilder: (_, i) {
                                 final p = _pages[i];
                                 return LayoutBuilder(
@@ -688,7 +1128,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
                                     final w = constraints.maxWidth;
                                     final h = constraints.maxHeight;
                                     if (w <= 0 || h <= 0) {
-                                      return const Center(child: CircularProgressIndicator());
+                                      return const Center(
+                                          child: CircularProgressIndicator());
                                     }
                                     // Explicit size avoids InteractiveViewer + Image getting
                                     // unbounded constraints (blank preview on some devices).
@@ -704,9 +1145,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
                                           p.bytes,
                                           fit: BoxFit.contain,
                                           gaplessPlayback: true,
-                                          errorBuilder: (_, __, ___) => const Padding(
+                                          errorBuilder: (_, __, ___) =>
+                                              const Padding(
                                             padding: EdgeInsets.all(24),
-                                            child: Text('Could not display this page.'),
+                                            child: Text(
+                                                'Could not display this page.'),
                                           ),
                                         ),
                                       ),
@@ -770,7 +1213,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
                                           width: 80,
                                           height: 108,
                                           color: Colors.grey.shade300,
-                                          child: const Icon(Icons.broken_image_outlined),
+                                          child: const Icon(
+                                              Icons.broken_image_outlined),
                                         ),
                                       ),
                                     ),
@@ -782,22 +1226,29 @@ class _ScannerScreenState extends State<ScannerScreen> {
                                       onTap: () {
                                         setState(() {
                                           _pages.removeAt(i);
-                                          _reviewPageIndex =
-                                              _pages.isEmpty ? 0 : _reviewPageIndex.clamp(0, _pages.length - 1);
+                                          _reviewPageIndex = _pages.isEmpty
+                                              ? 0
+                                              : _reviewPageIndex.clamp(
+                                                  0, _pages.length - 1);
                                           if (_pages.isEmpty) {
                                             _reviewPageController?.dispose();
                                             _reviewPageController = null;
                                           }
                                         });
-                                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                                          if (!mounted || _pages.isEmpty) return;
-                                          _reviewPageController?.jumpToPage(_reviewPageIndex);
+                                        WidgetsBinding.instance
+                                            .addPostFrameCallback((_) {
+                                          if (!mounted || _pages.isEmpty) {
+                                            return;
+                                          }
+                                          _reviewPageController
+                                              ?.jumpToPage(_reviewPageIndex);
                                         });
                                       },
                                       child: const CircleAvatar(
                                         radius: 10,
                                         backgroundColor: Colors.black54,
-                                        child: Icon(Icons.close, size: 12, color: Colors.white),
+                                        child: Icon(Icons.close,
+                                            size: 12, color: Colors.white),
                                       ),
                                     ),
                                   ),
@@ -854,11 +1305,29 @@ class _CornersPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final xs = corners.map((c) => c.dx).toList()..sort();
+    final ys = corners.map((c) => c.dy).toList()..sort();
+    final left = xs.first;
+    final right = xs.last;
+    final top = ys.first;
+    final bottom = ys.last;
+    final handles = <Offset>[
+      Offset(left, top),
+      Offset(right, top),
+      Offset(right, bottom),
+      Offset(left, bottom),
+      Offset((left + right) / 2, top),
+      Offset(right, (top + bottom) / 2),
+      Offset((left + right) / 2, bottom),
+      Offset(left, (top + bottom) / 2),
+    ];
+
     final path = Path();
-    for (int i = 0; i < corners.length; i++) {
+    for (int i = 0; i < 4; i++) {
+      final n = i < corners.length ? corners[i] : handles[i];
       final p = Offset(
-        imageRect.left + corners[i].dx * imageRect.width,
-        imageRect.top + corners[i].dy * imageRect.height,
+        imageRect.left + n.dx * imageRect.width,
+        imageRect.top + n.dy * imageRect.height,
       );
       if (i == 0) {
         path.moveTo(p.dx, p.dy);
@@ -873,7 +1342,7 @@ class _CornersPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
     canvas.drawPath(path, line);
     final pointPaint = Paint()..color = const Color(0xFF1857E6);
-    for (final c in corners) {
+    for (final c in handles) {
       final p = Offset(
         imageRect.left + c.dx * imageRect.width,
         imageRect.top + c.dy * imageRect.height,

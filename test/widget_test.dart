@@ -10,8 +10,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:office_toolspro/main.dart';
 
 void main() {
-  testWidgets('Shows app home title', (WidgetTester tester) async {
+  testWidgets('Shows home recent files section', (WidgetTester tester) async {
     await tester.pumpWidget(const OfficeToolsApp());
-    expect(find.text('Office Tools Pro'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.text('Recent Files'), findsOneWidget);
   });
 }

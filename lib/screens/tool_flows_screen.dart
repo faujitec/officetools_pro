@@ -40,25 +40,39 @@ class ToolOption {
 }
 
 const List<ToolOption> imageTools = <ToolOption>[
-  ToolOption(id: 'resize', name: 'Resize Image', icon: Icons.open_in_full_rounded),
+  ToolOption(
+      id: 'resize', name: 'Resize Image', icon: Icons.open_in_full_rounded),
   ToolOption(id: 'crop', name: 'Crop Image', icon: Icons.crop_rounded),
   ToolOption(
     id: 'remove-bg',
     name: 'Remove Background',
     icon: Icons.layers_outlined,
   ),
-  ToolOption(id: 'compress-img', name: 'Compress Image', icon: Icons.file_download_outlined),
-  ToolOption(id: 'convert-img', name: 'Convert Format', icon: Icons.sync_rounded),
+  ToolOption(
+      id: 'compress-img',
+      name: 'Compress Image',
+      icon: Icons.file_download_outlined),
+  ToolOption(
+      id: 'convert-img', name: 'Convert Format', icon: Icons.sync_rounded),
 ];
 
 const List<ToolOption> pdfTools = <ToolOption>[
   ToolOption(id: 'merge', name: 'Merge PDFs', icon: Icons.layers_outlined),
   ToolOption(id: 'split', name: 'Split PDF', icon: Icons.content_cut_rounded),
-  ToolOption(id: 'rearrange', name: 'Rearrange Pages', icon: Icons.picture_as_pdf_outlined),
-  ToolOption(id: 'delete', name: 'Delete Pages', icon: Icons.delete_outline_rounded),
-  ToolOption(id: 'rotate', name: 'Rotate Pages', icon: Icons.rotate_right_rounded),
-  ToolOption(id: 'compress-pdf', name: 'Compress PDF', icon: Icons.compress_rounded),
-  ToolOption(id: 'password', name: 'Password Protect', icon: Icons.lock_outline_rounded),
+  ToolOption(
+      id: 'rearrange',
+      name: 'Rearrange Pages',
+      icon: Icons.picture_as_pdf_outlined),
+  ToolOption(
+      id: 'delete', name: 'Delete Pages', icon: Icons.delete_outline_rounded),
+  ToolOption(
+      id: 'rotate', name: 'Rotate Pages', icon: Icons.rotate_right_rounded),
+  ToolOption(
+      id: 'compress-pdf', name: 'Compress PDF', icon: Icons.compress_rounded),
+  ToolOption(
+      id: 'password',
+      name: 'Password Protect',
+      icon: Icons.lock_outline_rounded),
   ToolOption(
     id: 'ocr',
     name: 'OCR (Extract Text)',
@@ -83,8 +97,12 @@ const List<ToolOption> convertTools = <ToolOption>[
     isBeta: true,
   ),
   ToolOption(id: 'img-pdf', name: 'Image to PDF', icon: Icons.image_outlined),
-  ToolOption(id: 'img-convert', name: 'Image Format', icon: Icons.photo_size_select_large_outlined),
-  ToolOption(id: 'text-pdf', name: 'Text to PDF', icon: Icons.text_snippet_outlined),
+  ToolOption(
+      id: 'img-convert',
+      name: 'Image Format',
+      icon: Icons.photo_size_select_large_outlined),
+  ToolOption(
+      id: 'text-pdf', name: 'Text to PDF', icon: Icons.text_snippet_outlined),
   ToolOption(
     id: 'excel-pdf',
     name: 'Excel to PDF',
@@ -92,11 +110,14 @@ const List<ToolOption> convertTools = <ToolOption>[
     requiresInternet: true,
     isBeta: true,
   ),
+  ToolOption(
+    id: 'compress-word',
+    name: 'Compress Word',
+    icon: Icons.compress_rounded,
+  ),
 ];
 
-const int _maxImageInputBytes = 20 * 1024 * 1024;
 const int _maxPdfInputBytes = 50 * 1024 * 1024;
-const int _maxDocInputBytes = 30 * 1024 * 1024;
 
 class ImageToolsScreen extends StatelessWidget {
   const ImageToolsScreen({super.key});
@@ -152,6 +173,7 @@ class _ToolListScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -181,7 +203,8 @@ class _ToolListScaffold extends StatelessWidget {
                 return _ToolListTile(
                   tool: tool,
                   onTap: () {
-                    AnalyticsService.logEvent('tool_open', props: {'tool_id': tool.id});
+                    AnalyticsService.logEvent('tool_open',
+                        props: {'tool_id': tool.id});
                     onTap(tool);
                   },
                 );
@@ -243,8 +266,21 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
   int _progress = 0;
   String _resultMessage = '';
   String? _lastOutputPath;
+  int? _beforeBytes;
+  int? _afterBytes;
   String _imageOutputFormat = 'jpg';
   Timer? _timer;
+
+  String _formatBytes(int bytes) {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    double size = bytes.toDouble();
+    int unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit++;
+    }
+    return '${size.toStringAsFixed(unit == 0 ? 0 : 1)} ${units[unit]}';
+  }
 
   Future<void> _pickFile() async {
     fp.FileType type = fp.FileType.any;
@@ -266,6 +302,10 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
         type = fp.FileType.custom;
         allowed = ['xls', 'xlsx'];
         break;
+      case 'compress-word':
+        type = fp.FileType.custom;
+        allowed = ['doc', 'docx'];
+        break;
     }
     final picked = await fp.FilePicker.platform.pickFiles(
       type: type,
@@ -279,7 +319,8 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
     setState(() => _selectedFile = file);
   }
 
-  Future<String> _saveConverted(Uint8List bytes, String ext, String toolId) async {
+  Future<String> _saveConverted(
+      Uint8List bytes, String ext, String toolId) async {
     final dir = await getApplicationDocumentsDirectory();
     final ts = DateTime.now().millisecondsSinceEpoch;
     final path = '${dir.path}/Converted_${toolId}_$ts.$ext';
@@ -304,13 +345,19 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
       if (mounted) setState(() => _progress += 10);
     });
     try {
-      final service = ConvertService(cloudConvertApiKey: widget.cloudConvertApiKey);
+      final service =
+          ConvertService(cloudConvertApiKey: widget.cloudConvertApiKey);
       ConvertResult result;
+      String successMessage = 'Saved output to My Files';
       if (widget.tool.id == 'img-pdf') {
-        if (_selectedFile?.bytes == null) throw Exception('Select an image first');
+        if (_selectedFile?.bytes == null) {
+          throw Exception('Select an image first');
+        }
         result = service.imageToPdf(_selectedFile!.bytes!);
       } else if (widget.tool.id == 'pdf-word') {
-        if (_selectedFile?.bytes == null) throw Exception('Select a PDF first');
+        if (_selectedFile?.bytes == null) {
+          throw Exception('Select a PDF first');
+        }
         result = await service.cloudConvert(
           inputBytes: _selectedFile!.bytes!,
           fileName: _selectedFile!.name,
@@ -318,7 +365,9 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
           outputFormat: 'docx',
         );
       } else if (widget.tool.id == 'word-pdf') {
-        if (_selectedFile?.bytes == null) throw Exception('Select a DOCX first');
+        if (_selectedFile?.bytes == null) {
+          throw Exception('Select a DOCX first');
+        }
         result = await service.cloudConvert(
           inputBytes: _selectedFile!.bytes!,
           fileName: _selectedFile!.name,
@@ -326,7 +375,9 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
           outputFormat: 'pdf',
         );
       } else if (widget.tool.id == 'excel-pdf') {
-        if (_selectedFile?.bytes == null) throw Exception('Select an XLS/XLSX first');
+        if (_selectedFile?.bytes == null) {
+          throw Exception('Select an XLS/XLSX first');
+        }
         final ext = (_selectedFile!.extension ?? 'xlsx').toLowerCase();
         result = await service.cloudConvert(
           inputBytes: _selectedFile!.bytes!,
@@ -334,24 +385,47 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
           inputFormat: ext == 'xls' ? 'xls' : 'xlsx',
           outputFormat: 'pdf',
         );
+      } else if (widget.tool.id == 'compress-word') {
+        if (_selectedFile?.bytes == null) {
+          throw Exception('Select a DOC/DOCX first');
+        }
+        final c = const CompressService().compressDocumentAsZip(
+          inputBytes: _selectedFile!.bytes!,
+          fileName: _selectedFile!.name,
+        );
+        result = ConvertResult(
+          bytes: c.bytes,
+          extension: c.extension,
+        );
+        successMessage = c.reduced
+            ? 'Word file compressed and saved.'
+            : 'No size reduction possible for this document.';
       } else if (widget.tool.id == 'img-convert') {
-        if (_selectedFile?.bytes == null) throw Exception('Select an image first');
-        result = service.convertImageFormat(_selectedFile!.bytes!, _imageOutputFormat);
+        if (_selectedFile?.bytes == null) {
+          throw Exception('Select an image first');
+        }
+        result = service.convertImageFormat(
+            _selectedFile!.bytes!, _imageOutputFormat);
       } else if (widget.tool.id == 'text-pdf') {
-        if (_textController.text.trim().isEmpty) throw Exception('Enter text first');
+        if (_textController.text.trim().isEmpty) {
+          throw Exception('Enter text first');
+        }
         result = service.textToPdf(_textController.text);
       } else {
         throw Exception('Unsupported convert tool');
       }
 
-      final path = await _saveConverted(result.bytes, result.extension, widget.tool.id);
+      final path =
+          await _saveConverted(result.bytes, result.extension, widget.tool.id);
       FileStore.addFile(
         FileItem(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           name: path.split('/').last,
           type: result.extension == 'pdf'
               ? FileType.pdf
-              : result.extension == 'docx'
+              : (result.extension == 'docx' ||
+                      result.extension == 'doc' ||
+                      result.extension == 'zip')
                   ? FileType.docx
                   : FileType.image,
           date: 'Just now',
@@ -364,12 +438,21 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
         _progress = 100;
         _success = true;
         _lastOutputPath = path;
-        _resultMessage = 'Saved output to My Files';
+        _resultMessage = successMessage;
+        if (widget.tool.id == 'compress-word' && _selectedFile?.bytes != null) {
+          _beforeBytes = _selectedFile!.bytes!.lengthInBytes;
+          _afterBytes = result.bytes.lengthInBytes;
+        } else {
+          _beforeBytes = null;
+          _afterBytes = null;
+        }
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _processing = false;
+        _beforeBytes = null;
+        _afterBytes = null;
       });
       final errorText = e.toString();
       String message = 'Could not convert. Check file type/size and retry.';
@@ -414,473 +497,132 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
                       16,
                       16 + MediaQuery.of(context).padding.bottom,
                     ),
-                  children: [
-              if (widget.tool.id != 'text-pdf') ...[
-                Builder(
-                  builder: (context) {
-                    final isDark = Theme.of(context).brightness == Brightness.dark;
-                    final f = _selectedFile;
-                    Widget? preview;
-                    final ext = (f?.extension ?? '').toLowerCase();
-                    if (f?.bytes != null &&
-                        (ext == 'jpg' ||
-                            ext == 'jpeg' ||
-                            ext == 'png' ||
-                            ext == 'webp' ||
-                            ext == 'gif' ||
-                            widget.tool.id == 'img-pdf' ||
-                            widget.tool.id == 'img-convert')) {
-                      preview = Image.memory(f!.bytes!, fit: BoxFit.contain);
-                    } else if (f != null) {
-                      preview = Center(
-                        child: ListTile(
-                          leading: Icon(
-                            ext == 'pdf' ? Icons.picture_as_pdf_rounded : Icons.description_outlined,
-                            color: ext == 'pdf' ? Colors.red : Colors.indigo,
-                            size: 40,
-                          ),
-                          title: Text(
-                            f.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          subtitle: const Text('Tap card to replace'),
+                    children: [
+                      if (widget.tool.id != 'text-pdf') ...[
+                        Builder(
+                          builder: (context) {
+                            final isDark =
+                                Theme.of(context).brightness == Brightness.dark;
+                            final f = _selectedFile;
+                            Widget? preview;
+                            final ext = (f?.extension ?? '').toLowerCase();
+                            if (f?.bytes != null &&
+                                (ext == 'jpg' ||
+                                    ext == 'jpeg' ||
+                                    ext == 'png' ||
+                                    ext == 'webp' ||
+                                    ext == 'gif' ||
+                                    widget.tool.id == 'img-pdf' ||
+                                    widget.tool.id == 'img-convert')) {
+                              preview =
+                                  Image.memory(f!.bytes!, fit: BoxFit.contain);
+                            } else if (f != null) {
+                              preview = Center(
+                                child: ListTile(
+                                  leading: Icon(
+                                    ext == 'pdf'
+                                        ? Icons.picture_as_pdf_rounded
+                                        : Icons.description_outlined,
+                                    color: ext == 'pdf'
+                                        ? Colors.red
+                                        : Colors.indigo,
+                                    size: 40,
+                                  ),
+                                  title: Text(
+                                    f.name,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700),
+                                  ),
+                                  subtitle: const Text('Tap card to replace'),
+                                ),
+                              );
+                            }
+                            return UploadDropCard(
+                              isDark: isDark,
+                              onTap: _pickFile,
+                              title: f == null ? 'Upload source file' : f.name,
+                              subtitle: f == null
+                                  ? 'Tap to choose a file for conversion'
+                                  : 'Tap to replace',
+                              preview: preview,
+                            );
+                          },
                         ),
-                      );
-                    }
-                    return UploadDropCard(
-                      isDark: isDark,
-                      onTap: _pickFile,
-                      title: f == null ? 'Upload source file' : f.name,
-                      subtitle: f == null ? 'Tap to choose a file for conversion' : 'Tap to replace',
-                      preview: preview,
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (widget.tool.id == 'img-convert') ...[
-                DropdownButtonFormField<String>(
-                  value: _imageOutputFormat,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Output image format',
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'jpg', child: Text('JPG')),
-                    DropdownMenuItem(value: 'png', child: Text('PNG')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _imageOutputFormat = v);
-                  },
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (widget.tool.id == 'text-pdf') ...[
-                TextField(
-                  controller: _textController,
-                  minLines: 4,
-                  maxLines: 7,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Input text',
-                    hintText: 'Type or paste text to convert to PDF',
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (_success)
-                Column(
-                  children: [
-                    _SuccessPanel(
-                      title: 'Conversion Successful',
-                      subtitle: _resultMessage,
-                    ),
-                    const SizedBox(height: 10),
-                    _PostJobActions(
-                      filePath: _lastOutputPath,
-                      onOpenMyFiles: () => Navigator.pushNamed(context, '/my-files'),
-                    ),
-                  ],
-                )
-              else
-                ElevatedButton(
-                  onPressed: (widget.tool.id == 'text-pdf')
-                      ? _convert
-                      : (_selectedFile == null ? null : _convert),
-                  child: const Text('Convert Now'),
-                ),
-                  ],
-                ),
-                  if (_processing)
-                    _ProcessingOverlay(message: 'Converting...', progress: _progress),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class CompressScreen extends StatefulWidget {
-  const CompressScreen({super.key});
-
-  @override
-  State<CompressScreen> createState() => _CompressScreenState();
-}
-
-class _CompressScreenState extends State<CompressScreen> {
-  final CompressService _compressService = const CompressService();
-  final List<(String id, String label)> _tabs = const [
-    ('image', 'Compress Image'),
-    ('pdf', 'Compress PDF'),
-    ('doc', 'Compress Document'),
-  ];
-
-  String _activeTab = 'image';
-  int _compression = 50;
-  fp.PlatformFile? _selected;
-  String _imageFormat = 'jpg';
-  bool _downscale = false;
-  PdfCompressionLevel _pdfLevel = PdfCompressionLevel.normal;
-  int _progress = 0;
-  bool _processing = false;
-  bool _success = false;
-  int? _beforeBytes;
-  int? _afterBytes;
-  String _resultMessage = '';
-  String? _lastOutputPath;
-  Timer? _timer;
-
-  Future<void> _pickFile() async {
-    final result = await fp.FilePicker.platform.pickFiles(
-      type: _activeTab == 'image'
-          ? fp.FileType.image
-          : _activeTab == 'pdf'
-              ? fp.FileType.custom
-              : fp.FileType.custom,
-      allowedExtensions:
-          _activeTab == 'pdf' ? ['pdf'] : _activeTab == 'doc' ? ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'] : null,
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not read selected file. Please choose another one.')),
-      );
-      return;
-    }
-    final maxBytes = _activeTab == 'image'
-        ? _maxImageInputBytes
-        : _activeTab == 'pdf'
-            ? _maxPdfInputBytes
-            : _maxDocInputBytes;
-    if (bytes.lengthInBytes > maxBytes) {
-      if (!mounted) return;
-      final mb = (maxBytes / (1024 * 1024)).round();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Selected file is too large. Limit for this tab is ${mb}MB.')),
-      );
-      return;
-    }
-    setState(() {
-      _selected = file;
-      _success = false;
-      _beforeBytes = null;
-      _afterBytes = null;
-      _resultMessage = '';
-    });
-  }
-
-  Future<String> _saveCompressedFile(Uint8List bytes, String ext) async {
-    final dir = await getApplicationDocumentsDirectory();
-    final ts = DateTime.now().millisecondsSinceEpoch;
-    final fileName = 'Compressed_${_activeTab}_$ts.$ext';
-    final file = File('${dir.path}/$fileName');
-    await file.writeAsBytes(bytes, flush: true);
-    return file.path;
-  }
-
-  Future<void> _startCompression() async {
-    if (_selected == null || _selected!.bytes == null) return;
-    _timer?.cancel();
-    setState(() {
-      _processing = true;
-      _success = false;
-      _progress = 0;
-    });
-
-    _timer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      if (_progress >= 90) {
-        timer.cancel();
-        return;
-      }
-      if (!mounted) return;
-      setState(() => _progress += 10);
-    });
-
-    try {
-      final input = _selected!.bytes!;
-      late CompressResult result;
-
-      if (_activeTab == 'image') {
-        result = _compressService.compressImage(
-          inputBytes: input,
-          quality: _compression,
-          outputFormat: _imageFormat,
-          downscale: _downscale,
-        );
-      } else if (_activeTab == 'pdf') {
-        result = _compressService.compressPdf(
-          inputBytes: input,
-          level: _pdfLevel,
-        );
-      } else {
-        result = _compressService.compressDocumentAsZip(
-          inputBytes: input,
-          fileName: _selected!.name,
-        );
-      }
-
-      final outputPath = await _saveCompressedFile(result.bytes, result.extension);
-      final outputName = outputPath.split('/').last;
-      FileStore.addFile(
-        FileItem(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          name: outputName,
-          type: _activeTab == 'image'
-              ? FileType.image
-              : _activeTab == 'pdf'
-                  ? FileType.pdf
-                  : FileType.docx,
-          date: 'Just now',
-          path: outputPath,
-        ),
-      );
-
-      if (!mounted) return;
-      setState(() {
-        _processing = false;
-        _progress = 100;
-        _success = true;
-        _lastOutputPath = outputPath;
-        _beforeBytes = result.originalSize;
-        _afterBytes = result.compressedSize;
-        final saved = result.originalSize == 0
-            ? 0
-            : ((1 - (result.compressedSize / result.originalSize)) * 100).round();
-        _resultMessage = 'Saved $saved% • Added to My Files';
-      });
-      AnalyticsService.logEvent('tool_success', props: {'tool_id': 'compress_$_activeTab'});
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _processing = false;
-        _resultMessage = 'Compression failed';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not compress this file. Please try another file or lower settings.'),
-        ),
-      );
-      AnalyticsService.logEvent('tool_fail', props: {'tool_id': 'compress_$_activeTab', 'code': 'COMPRESS_FAIL'});
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Compress Files')),
-      body: SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            const SizedBox(height: 8),
-            const InlineBannerAd(),
-            const SizedBox(height: 8),
-            Expanded(
-              child: Stack(
-                children: [
-                  ListView(
-                    padding: EdgeInsets.fromLTRB(
-                      16,
-                      16,
-                      16,
-                      16 + MediaQuery.of(context).padding.bottom,
-                    ),
-                  children: [
-              Row(
-                children: _tabs.map((tab) {
-                  final selected = tab.$1 == _activeTab;
-                  return Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 3),
-                      child: ElevatedButton(
-                        onPressed: () {
-                          setState(() {
-                            _activeTab = tab.$1;
-                            _selected = null;
-                            _success = false;
-                          });
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: selected ? const Color(0xFF1857E6) : Colors.white,
-                          foregroundColor: selected ? Colors.white : Colors.black87,
-                        ),
-                        child: Text(tab.$1.toUpperCase()),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Builder(
-                builder: (context) {
-                  final isDark = Theme.of(context).brightness == Brightness.dark;
-                  final sub = _activeTab == 'image'
-                      ? 'Tap to pick an image from your device'
-                      : _activeTab == 'pdf'
-                          ? 'Tap to pick a PDF'
-                          : 'Tap to pick a document (Office formats)';
-                  Widget? preview;
-                  final sel = _selected;
-                  if (sel != null) {
-                    if (_activeTab == 'image' && sel.bytes != null) {
-                      preview = Image.memory(sel.bytes!, fit: BoxFit.contain);
-                    } else {
-                      preview = Center(
-                        child: ListTile(
-                          leading: Icon(
-                            _activeTab == 'pdf'
-                                ? Icons.picture_as_pdf_rounded
-                                : Icons.description_outlined,
-                            color: Colors.redAccent,
-                            size: 40,
+                        const SizedBox(height: 12),
+                      ],
+                      if (widget.tool.id == 'img-convert') ...[
+                        DropdownButtonFormField<String>(
+                          value: _imageOutputFormat,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            labelText: 'Output image format',
                           ),
-                          title: Text(
-                            sel.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          subtitle: const Text('Tap card to replace'),
+                          items: const [
+                            DropdownMenuItem(value: 'jpg', child: Text('JPG')),
+                            DropdownMenuItem(value: 'png', child: Text('PNG')),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(() => _imageOutputFormat = v);
+                            }
+                          },
                         ),
-                      );
-                    }
-                  }
-                  return UploadDropCard(
-                    isDark: isDark,
-                    onTap: _pickFile,
-                    title: sel == null ? 'Choose file' : sel.name,
-                    subtitle: sel == null ? sub : 'Tap to replace this file',
-                    preview: preview,
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              if (_activeTab == 'image') ...[
-                DropdownButtonFormField<String>(
-                  value: _imageFormat,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Output format',
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'jpg', child: Text('JPG')),
-                    DropdownMenuItem(value: 'png', child: Text('PNG')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _imageFormat = v);
-                  },
-                ),
-                const SizedBox(height: 10),
-                SwitchListTile(
-                  title: const Text('Downscale dimensions (smaller size)'),
-                  value: _downscale,
-                  onChanged: (v) => setState(() => _downscale = v),
-                ),
-              ],
-              if (_activeTab == 'pdf') ...[
-                DropdownButtonFormField<PdfCompressionLevel>(
-                  value: _pdfLevel,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'PDF compression preset',
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: PdfCompressionLevel.belowNormal,
-                      child: Text('Low'),
-                    ),
-                    DropdownMenuItem(
-                      value: PdfCompressionLevel.normal,
-                      child: Text('Balanced'),
-                    ),
-                    DropdownMenuItem(
-                      value: PdfCompressionLevel.aboveNormal,
-                      child: Text('High'),
-                    ),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _pdfLevel = v);
-                  },
-                ),
-              ],
-              Text('Compression: $_compression%'),
-              Slider(
-                value: _compression.toDouble(),
-                min: 10,
-                max: 90,
-                onChanged: (v) => setState(() => _compression = v.round()),
-              ),
-              const SizedBox(height: 10),
-              if (_success)
-                Column(
-                  children: [
-                    _SuccessPanel(
-                      title: 'Compression Complete',
-                      subtitle: _resultMessage.isEmpty ? 'File is ready in My Files.' : _resultMessage,
-                    ),
-                    if (_beforeBytes != null && _afterBytes != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Before: ${_formatBytes(_beforeBytes!)}  •  After: ${_formatBytes(_afterBytes!)}',
-                        style: const TextStyle(color: Color(0xFF475569), fontWeight: FontWeight.w600),
-                      ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (widget.tool.id == 'text-pdf') ...[
+                        TextField(
+                          controller: _textController,
+                          minLines: 4,
+                          maxLines: 7,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            labelText: 'Input text',
+                            hintText: 'Type or paste text to convert to PDF',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (_success)
+                        Column(
+                          children: [
+                            _SuccessPanel(
+                              title: 'Conversion Successful',
+                              subtitle: _resultMessage,
+                            ),
+                            const SizedBox(height: 10),
+                            _PostJobActions(
+                              filePath: _lastOutputPath,
+                              onOpenMyFiles: () =>
+                                  Navigator.pushNamed(context, '/my-files'),
+                            ),
+                            if (widget.tool.id == 'compress-word' &&
+                                _beforeBytes != null &&
+                                _afterBytes != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                'Before: ${_formatBytes(_beforeBytes!)}  •  After: ${_formatBytes(_afterBytes!)}',
+                                style: const TextStyle(
+                                  color: Color(0xFF475569),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ],
+                        )
+                      else
+                        ElevatedButton(
+                          onPressed: (widget.tool.id == 'text-pdf')
+                              ? _convert
+                              : (_selectedFile == null ? null : _convert),
+                          child: const Text('Convert Now'),
+                        ),
                     ],
-                    const SizedBox(height: 10),
-                    _PostJobActions(
-                      filePath: _lastOutputPath,
-                      onOpenMyFiles: () => Navigator.pushNamed(context, '/my-files'),
-                    ),
-                  ],
-                )
-              else if (_beforeBytes != null && _afterBytes != null)
-                Text(
-                  'Before: ${_formatBytes(_beforeBytes!)}  •  After: ${_formatBytes(_afterBytes!)}',
-                  style: const TextStyle(color: Color(0xFF475569), fontWeight: FontWeight.w600),
-                )
-              else
-                ElevatedButton(
-                  onPressed: _selected == null ? null : _startCompression,
-                  child: const Text('Compress Now'),
-                ),
-                  ],
-                ),
+                  ),
                   if (_processing)
-                    _ProcessingOverlay(message: 'Compressing...', progress: _progress),
+                    _ProcessingOverlay(
+                        message: 'Converting...', progress: _progress),
                 ],
               ),
             ),
@@ -888,17 +630,6 @@ class _CompressScreenState extends State<CompressScreen> {
         ),
       ),
     );
-  }
-
-  String _formatBytes(int bytes) {
-    const units = ['B', 'KB', 'MB', 'GB'];
-    double size = bytes.toDouble();
-    int unit = 0;
-    while (size >= 1024 && unit < units.length - 1) {
-      size /= 1024;
-      unit++;
-    }
-    return '${size.toStringAsFixed(unit == 0 ? 0 : 1)} ${units[unit]}';
   }
 }
 
@@ -922,6 +653,7 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
   img.Image? _decodedSource;
   Uint8List? _sourceBytes;
   Uint8List? _previewBytes;
+  Uint8List? _removedBgCutoutBytes;
   String? _lastOutputPath;
   String _statusText = '';
   String? _lastErrorCode;
@@ -931,15 +663,18 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
   bool _showOriginalPreview = false;
   int _progress = 0;
   int _quality = 80;
+  Color? _removeBgSolidColor;
   bool _lockAspectRatio = true;
   int _resizeWidth = 1080;
   int _resizeHeight = 1080;
   String _cropRatio = 'free';
   String _convertFormat = 'jpg';
+  String _sourceFormat = 'jpg';
   int? _statInputBytes;
   int? _statOutputBytes;
   String? _statBeforeDims;
   String? _statAfterDims;
+
   /// Normalized crop in image space (0–1): left, top, right, bottom.
   double _cropL = 0;
   double _cropT = 0;
@@ -964,9 +699,13 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
         return;
       }
       if (!mounted) return;
+      final sourceFormat = _detectImageFormat(bytes);
       setState(() {
         _decodedSource = decoded;
         _sourceBytes = Uint8List.fromList(bytes);
+        _removedBgCutoutBytes = null;
+        _removeBgSolidColor = null;
+        _sourceFormat = sourceFormat;
         _resizeWidth = decoded.width;
         _resizeHeight = decoded.height;
         _resizeWController.text = decoded.width.toString();
@@ -996,7 +735,8 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
     } on PlatformException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Image picker is busy. Please try again.')),
+        const SnackBar(
+            content: Text('Image picker is busy. Please try again.')),
       );
     } finally {
       _isPickingImage = false;
@@ -1022,6 +762,17 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
 
   bool get _removeBgUnavailable =>
       widget.tool.id == 'remove-bg' && (!Platform.isAndroid && !Platform.isIOS);
+
+  static const List<Color> _removeBgPalette = <Color>[
+    Colors.white,
+    Color(0xFFF8FAFC),
+    Color(0xFF111827),
+    Color(0xFFE0F2FE),
+    Color(0xFFFEE2E2),
+    Color(0xFFDCFCE7),
+    Color(0xFFFFEDD5),
+    Color(0xFFEDE9FE),
+  ];
 
   img.Image _applyCrop(img.Image source) {
     if (widget.tool.id == 'crop') {
@@ -1107,7 +858,8 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
     final source = _decodedSource!;
     switch (widget.tool.id) {
       case 'resize':
-        return img.copyResize(source, width: _resizeWidth, height: _resizeHeight);
+        return img.copyResize(source,
+            width: _resizeWidth, height: _resizeHeight);
       case 'crop':
         return _applyCrop(source);
       case 'remove-bg':
@@ -1129,8 +881,13 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
   }
 
   Uint8List _encodeForCurrentTool(img.Image image) {
+    if (widget.tool.id == 'resize') {
+      return _encodeResizeOutput(image);
+    }
     if (widget.tool.id == 'convert-img') {
-      if (_convertFormat == 'png') return Uint8List.fromList(img.encodePng(image));
+      if (_convertFormat == 'png') {
+        return Uint8List.fromList(img.encodePng(image));
+      }
       return Uint8List.fromList(img.encodeJpg(image, quality: _quality));
     }
     if (widget.tool.id == 'remove-bg') {
@@ -1142,13 +899,48 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
     return Uint8List.fromList(img.encodePng(image));
   }
 
+  Uint8List _encodeResizeOutput(img.Image image) {
+    // If dimensions are unchanged, keep original bytes to avoid quality loss
+    // and accidental size inflation from format conversion.
+    if (_sourceBytes != null &&
+        _decodedSource != null &&
+        image.width == _decodedSource!.width &&
+        image.height == _decodedSource!.height) {
+      return _sourceBytes!;
+    }
+
+    if (_sourceFormat == 'png') {
+      return Uint8List.fromList(img.encodePng(image));
+    }
+
+    // For JPEG-like sources, encode as JPEG and try not to exceed original size
+    // when the image was downscaled.
+    final original = _sourceBytes?.lengthInBytes ?? 0;
+    final wasDownscaled = _decodedSource != null &&
+        (image.width < _decodedSource!.width ||
+            image.height < _decodedSource!.height);
+
+    var q = 90;
+    var out = Uint8List.fromList(img.encodeJpg(image, quality: q));
+    if (wasDownscaled && original > 0) {
+      var guard = 0;
+      while (out.lengthInBytes > original && q > 55 && guard < 12) {
+        guard++;
+        q -= 5;
+        out = Uint8List.fromList(img.encodeJpg(image, quality: q));
+      }
+    }
+    return out;
+  }
+
   /// Re-encodes as JPEG, lowering quality (and optionally size) until output is
   /// smaller than the picked file when possible — avoids "compressed" files
   /// that are larger than the original.
   Uint8List _encodeCompressJpgSmallerThanOriginal(img.Image processed) {
     final cap = _sourceBytes?.lengthInBytes ?? 0;
     if (cap <= 0) {
-      return Uint8List.fromList(img.encodeJpg(processed, quality: _quality.clamp(10, 95)));
+      return Uint8List.fromList(
+          img.encodeJpg(processed, quality: _quality.clamp(10, 95)));
     }
     var q = _quality.clamp(10, 95);
     var out = Uint8List.fromList(img.encodeJpg(processed, quality: q));
@@ -1158,7 +950,9 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
       q = (q - 4).clamp(12, 95);
       out = Uint8List.fromList(img.encodeJpg(processed, quality: q));
     }
-    if (out.lengthInBytes >= cap && processed.width > 160 && processed.height > 160) {
+    if (out.lengthInBytes >= cap &&
+        processed.width > 160 &&
+        processed.height > 160) {
       final w = math.max(96, (processed.width * 0.86).round());
       final h = math.max(96, (processed.height * 0.86).round());
       final small = img.copyResize(processed, width: w, height: h);
@@ -1178,7 +972,52 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
     if (widget.tool.id == 'convert-img') return _convertFormat;
     if (widget.tool.id == 'remove-bg') return 'png';
     if (widget.tool.id == 'compress-img') return 'jpg';
+    if (widget.tool.id == 'resize') return _sourceFormat;
     return 'png';
+  }
+
+  String _detectImageFormat(Uint8List bytes) {
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return 'png';
+    }
+    if (bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8) {
+      return 'jpg';
+    }
+    return 'jpg';
+  }
+
+  Uint8List _composeRemovedForegroundOnColor(
+      Uint8List cutoutBytes, Color color) {
+    final src = img.decodeImage(cutoutBytes);
+    if (src == null) return cutoutBytes;
+    final out = img.Image(width: src.width, height: src.height, numChannels: 4);
+    final argb = color.toARGB32();
+    final br = (argb >> 16) & 0xFF;
+    final bg = (argb >> 8) & 0xFF;
+    final bb = argb & 0xFF;
+    for (var y = 0; y < src.height; y++) {
+      for (var x = 0; x < src.width; x++) {
+        final p = src.getPixel(x, y);
+        final a = p.a.toInt().clamp(0, 255);
+        final t = a / 255.0;
+        final r = (p.r * t + br * (1 - t)).round().clamp(0, 255);
+        final g = (p.g * t + bg * (1 - t)).round().clamp(0, 255);
+        final b = (p.b * t + bb * (1 - t)).round().clamp(0, 255);
+        out.setPixelRgba(x, y, r, g, b, 255);
+      }
+    }
+    return Uint8List.fromList(img.encodePng(out));
+  }
+
+  Uint8List _removeBgOutputBytes() {
+    final cutout = _removedBgCutoutBytes ?? _previewBytes ?? _sourceBytes;
+    if (cutout == null) return Uint8List(0);
+    if (_removeBgSolidColor == null) return cutout;
+    return _composeRemovedForegroundOnColor(cutout, _removeBgSolidColor!);
   }
 
   Future<String> _saveOutput(Uint8List data) async {
@@ -1213,7 +1052,9 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
         if (_sourceBytes == null) {
           throw Exception('No source image');
         }
-        bytes = await const SelfieSegmentationService().removeBackground(_sourceBytes!);
+        _removedBgCutoutBytes = await const SelfieSegmentationService()
+            .removeBackground(_sourceBytes!);
+        bytes = _removeBgOutputBytes();
       } else {
         final processed = _buildProcessedImage();
         bytes = widget.tool.id == 'compress-img'
@@ -1245,14 +1086,16 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
         if (widget.tool.id == 'resize' || widget.tool.id == 'compress-img') {
           _statInputBytes = _sourceBytes?.lengthInBytes;
           _statOutputBytes = bytes.lengthInBytes;
-          _statBeforeDims = '${_decodedSource!.width} × ${_decodedSource!.height} px';
+          _statBeforeDims =
+              '${_decodedSource!.width} × ${_decodedSource!.height} px';
           final outImg = img.decodeImage(bytes);
           _statAfterDims = outImg != null
               ? '${outImg.width} × ${outImg.height} px'
-              : '${_resizeWidth} × ${_resizeHeight} px';
+              : '$_resizeWidth × $_resizeHeight px';
         }
       });
-      AnalyticsService.logEvent('tool_success', props: {'tool_id': widget.tool.id});
+      AnalyticsService.logEvent('tool_success',
+          props: {'tool_id': widget.tool.id});
     } on UnsupportedError catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1262,7 +1105,9 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
         _lastErrorMessage = e.message;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message ?? 'This action is not supported on this platform.')),
+        SnackBar(
+            content: Text(
+                e.message ?? 'This action is not supported on this platform.')),
       );
       AnalyticsService.logEvent(
         'tool_fail',
@@ -1295,20 +1140,19 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
   }
 
   Future<void> _downloadPngCopy() async {
-    if (_lastOutputPath == null) return;
+    if (widget.tool.id != 'remove-bg') return;
     try {
-      final source = File(_lastOutputPath!);
-      if (!await source.exists()) {
-        throw Exception('Output file not found');
-      }
-      final bytes = await source.readAsBytes();
-      final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
-      final fileName = 'BG_Removed_${DateTime.now().millisecondsSinceEpoch}.png';
+      final bytes = _removeBgOutputBytes();
+      if (bytes.isEmpty) throw Exception('Output file not found');
+      final dir = await getDownloadsDirectory() ??
+          await getApplicationDocumentsDirectory();
+      final fileName =
+          'BG_Removed_${DateTime.now().millisecondsSinceEpoch}.png';
       final output = File('${dir.path}/$fileName');
       await output.writeAsBytes(bytes, flush: true);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('PNG saved: ${output.path}')),
+        const SnackBar(content: Text('PNG copy saved')),
       );
     } catch (_) {
       if (!mounted) return;
@@ -1368,379 +1212,567 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
                       18,
                       8,
                       18,
-                      18 + MediaQuery.of(context).padding.bottom,
+                      18 +
+                          MediaQuery.of(context).padding.bottom +
+                          MediaQuery.of(context).viewInsets.bottom,
                     ),
-                  child: Column(
-                    children: [
-                Expanded(
-                  child: UploadDropCard(
-                    isDark: isDark,
-                    onTap: _pickImage,
-                    title: 'Choose Image',
-                    subtitle: 'Tap to upload from gallery',
-                    preview: _previewBytes == null
-                        ? null
-                        : widget.tool.id == 'crop' && _decodedSource != null && _sourceBytes != null
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(26),
-                                  child: LayoutBuilder(
-                                    builder: (context, cons) {
-                                      final imgSize = Size(
-                                        _decodedSource!.width.toDouble(),
-                                        _decodedSource!.height.toDouble(),
-                                      );
-                                      final imageRect = containImageForBoxFit(
-                                        Size(cons.maxWidth, cons.maxHeight),
-                                        imgSize,
-                                      );
-                                      final hit = 48.0;
-                                      final bytes = _sourceBytes!;
-                                      return GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onPanStart: (d) {
-                                          final local = d.localPosition;
-                                          final corners = <Offset>[
-                                            Offset(_cropL, _cropT),
-                                            Offset(_cropR, _cropT),
-                                            Offset(_cropR, _cropB),
-                                            Offset(_cropL, _cropB),
-                                          ];
-                                          double best = 1e9;
-                                          var idx = 0;
-                                          for (var i = 0; i < 4; i++) {
-                                            final p = Offset(
-                                              imageRect.left + corners[i].dx * imageRect.width,
-                                              imageRect.top + corners[i].dy * imageRect.height,
-                                            );
-                                            final dist = (p - local).distance;
-                                            if (dist < best) {
-                                              best = dist;
-                                              idx = i;
-                                            }
-                                          }
-                                          setState(() {
-                                            _cropDragHandle = best <= hit ? idx : null;
-                                          });
-                                        },
-                                        onPanUpdate: (d) {
-                                          if (_cropDragHandle == null) return;
-                                          final nx = ((d.localPosition.dx - imageRect.left) / imageRect.width)
-                                              .clamp(0.0, 1.0);
-                                          final ny = ((d.localPosition.dy - imageRect.top) / imageRect.height)
-                                              .clamp(0.0, 1.0);
-                                          setState(() {
-                                            switch (_cropDragHandle!) {
-                                              case 0:
-                                                _cropL = nx;
-                                                _cropT = ny;
-                                                break;
-                                              case 1:
-                                                _cropR = nx;
-                                                _cropT = ny;
-                                                break;
-                                              case 2:
-                                                _cropR = nx;
-                                                _cropB = ny;
-                                                break;
-                                              case 3:
-                                                _cropL = nx;
-                                                _cropB = ny;
-                                                break;
-                                            }
-                                            if (_cropL > _cropR) {
-                                              final t = _cropL;
-                                              _cropL = _cropR;
-                                              _cropR = t;
-                                            }
-                                            if (_cropT > _cropB) {
-                                              final t = _cropT;
-                                              _cropT = _cropB;
-                                              _cropB = t;
-                                            }
-                                            _clampCropNorm();
-                                          });
-                                          _updatePreview();
-                                        },
-                                        onPanEnd: (_) {
-                                          setState(() => _cropDragHandle = null);
-                                        },
-                                        child: Stack(
-                                          fit: StackFit.expand,
-                                          children: [
-                                            Center(
+                    child: SingleChildScrollView(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      child: Column(
+                        children: [
+                          Center(
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: AspectRatio(
+                                // Adapt preview canvas to source image shape so
+                                // portrait photos don't look excessively squeezed.
+                                aspectRatio: (widget.tool.id == 'crop' &&
+                                        _decodedSource != null)
+                                    ? (_decodedSource!.width /
+                                            _decodedSource!.height)
+                                        .clamp(0.62, 1.6)
+                                    : 16 / 9,
+                                child: UploadDropCard(
+                                  isDark: isDark,
+                                  onTap: _pickImage,
+                                  title: 'Choose Image',
+                                  subtitle: 'Tap to upload from gallery',
+                                  preview: _previewBytes == null
+                                      ? null
+                                      : widget.tool.id == 'crop' &&
+                                              _decodedSource != null &&
+                                              _sourceBytes != null
+                                          ? ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(26),
+                                              child: LayoutBuilder(
+                                                builder: (context, cons) {
+                                                  final imgSize = Size(
+                                                    _decodedSource!.width
+                                                        .toDouble(),
+                                                    _decodedSource!.height
+                                                        .toDouble(),
+                                                  );
+                                                  final imageRect =
+                                                      containImageForBoxFit(
+                                                    Size(cons.maxWidth,
+                                                        cons.maxHeight),
+                                                    imgSize,
+                                                  );
+                                                  const hit = 48.0;
+                                                  final bytes = _sourceBytes!;
+                                                  return GestureDetector(
+                                                    behavior:
+                                                        HitTestBehavior.opaque,
+                                                    onPanStart: (d) {
+                                                      final local =
+                                                          d.localPosition;
+                                                      final corners = <Offset>[
+                                                        Offset(_cropL, _cropT),
+                                                        Offset(_cropR, _cropT),
+                                                        Offset(_cropR, _cropB),
+                                                        Offset(_cropL, _cropB),
+                                                      ];
+                                                      double best = 1e9;
+                                                      var idx = 0;
+                                                      for (var i = 0;
+                                                          i < 4;
+                                                          i++) {
+                                                        final p = Offset(
+                                                          imageRect.left +
+                                                              corners[i].dx *
+                                                                  imageRect
+                                                                      .width,
+                                                          imageRect.top +
+                                                              corners[i].dy *
+                                                                  imageRect
+                                                                      .height,
+                                                        );
+                                                        final dist = (p - local)
+                                                            .distance;
+                                                        if (dist < best) {
+                                                          best = dist;
+                                                          idx = i;
+                                                        }
+                                                      }
+                                                      setState(() {
+                                                        _cropDragHandle =
+                                                            best <= hit
+                                                                ? idx
+                                                                : null;
+                                                      });
+                                                    },
+                                                    onPanUpdate: (d) {
+                                                      if (_cropDragHandle ==
+                                                          null) {
+                                                        return;
+                                                      }
+                                                      final nx = ((d.localPosition
+                                                                      .dx -
+                                                                  imageRect
+                                                                      .left) /
+                                                              imageRect.width)
+                                                          .clamp(0.0, 1.0);
+                                                      final ny =
+                                                          ((d.localPosition.dy -
+                                                                      imageRect
+                                                                          .top) /
+                                                                  imageRect
+                                                                      .height)
+                                                              .clamp(0.0, 1.0);
+                                                      setState(() {
+                                                        switch (
+                                                            _cropDragHandle!) {
+                                                          case 0:
+                                                            _cropL = nx;
+                                                            _cropT = ny;
+                                                            break;
+                                                          case 1:
+                                                            _cropR = nx;
+                                                            _cropT = ny;
+                                                            break;
+                                                          case 2:
+                                                            _cropR = nx;
+                                                            _cropB = ny;
+                                                            break;
+                                                          case 3:
+                                                            _cropL = nx;
+                                                            _cropB = ny;
+                                                            break;
+                                                        }
+                                                        if (_cropL > _cropR) {
+                                                          final t = _cropL;
+                                                          _cropL = _cropR;
+                                                          _cropR = t;
+                                                        }
+                                                        if (_cropT > _cropB) {
+                                                          final t = _cropT;
+                                                          _cropT = _cropB;
+                                                          _cropB = t;
+                                                        }
+                                                        _clampCropNorm();
+                                                      });
+                                                      _updatePreview();
+                                                    },
+                                                    onPanEnd: (_) {
+                                                      setState(() =>
+                                                          _cropDragHandle =
+                                                              null);
+                                                    },
+                                                    child: Stack(
+                                                      fit: StackFit.expand,
+                                                      children: [
+                                                        Center(
+                                                          child: Image.memory(
+                                                            bytes,
+                                                            fit: BoxFit.contain,
+                                                            errorBuilder: (_,
+                                                                    __, ___) =>
+                                                                const Center(
+                                                                    child: Text(
+                                                                        'Preview unavailable')),
+                                                          ),
+                                                        ),
+                                                        CustomPaint(
+                                                          size: Size(
+                                                              cons.maxWidth,
+                                                              cons.maxHeight),
+                                                          painter:
+                                                              _ImageCropOverlayPainter(
+                                                            imageRect:
+                                                                imageRect,
+                                                            cropL: _cropL,
+                                                            cropT: _cropT,
+                                                            cropR: _cropR,
+                                                            cropB: _cropB,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                            )
+                                          : ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(26),
                                               child: Image.memory(
-                                                bytes,
+                                                (_showOriginalPreview &&
+                                                        _sourceBytes != null)
+                                                    ? _sourceBytes!
+                                                    : _previewBytes!,
                                                 fit: BoxFit.contain,
                                                 errorBuilder: (_, __, ___) =>
-                                                    const Center(child: Text('Preview unavailable')),
+                                                    const Center(
+                                                  child: Text(
+                                                    'Preview unavailable',
+                                                  ),
+                                                ),
                                               ),
                                             ),
-                                            CustomPaint(
-                                              size: Size(cons.maxWidth, cons.maxHeight),
-                                              painter: _ImageCropOverlayPainter(
-                                                imageRect: imageRect,
-                                                cropL: _cropL,
-                                                cropT: _cropT,
-                                                cropR: _cropR,
-                                                cropB: _cropB,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                )
-                              : ClipRRect(
-                                  borderRadius: BorderRadius.circular(26),
-                                  child: Image.memory(
-                                    (_showOriginalPreview && _sourceBytes != null)
-                                        ? _sourceBytes!
-                                        : _previewBytes!,
-                                    fit: BoxFit.contain,
-                                    errorBuilder: (_, __, ___) =>
-                                        const Center(child: Text('Preview unavailable')),
-                                  ),
-                                ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (_decodedSource != null) ...[
-                  if (_lastErrorCode != null) ...[
-                    _ErrorBanner(
-                      code: _lastErrorCode!,
-                      message: _lastErrorMessage ?? 'Something went wrong.',
-                      onRetry: _decodedSource == null ? null : _start,
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  if (_removeBgUnavailable)
-                    Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF7ED),
-                        border: Border.all(color: const Color(0xFFFED7AA)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Text(
-                        'Remove Background uses on-device ML Kit (Android & iOS only). Works best for photos with people.',
-                        style: TextStyle(
-                          color: Color(0xFF9A3412),
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  _ImageToolControls(
-                    toolId: widget.tool.id,
-                    quality: _quality,
-                    lockAspectRatio: _lockAspectRatio,
-                    resizeWidth: _resizeWidth,
-                    resizeHeight: _resizeHeight,
-                    cropRatio: _cropRatio,
-                    convertFormat: _convertFormat,
-                    onQualityChanged: (v) {
-                      setState(() => _quality = v);
-                      _updatePreview();
-                    },
-                    onAspectLockChanged: (v) {
-                      setState(() {
-                        _lockAspectRatio = v;
-                        if (v && _decodedSource != null) {
-                          final ratio = _decodedSource!.height / _decodedSource!.width;
-                          _resizeHeight = (_resizeWidth * ratio).round();
-                          _resizeHController.text = _resizeHeight.toString();
-                        }
-                      });
-                      _updatePreview();
-                    },
-                    resizeWidthController: _resizeWController,
-                    resizeHeightController: _resizeHController,
-                    onResizeWidthChanged: (v) {
-                      final value = int.tryParse(v.trim());
-                      if (value == null || value <= 0 || _decodedSource == null) return;
-                      setState(() {
-                        _resizeWidth = value;
-                        if (_lockAspectRatio) {
-                          final ratio = _decodedSource!.height / _decodedSource!.width;
-                          _resizeHeight = (_resizeWidth * ratio).round();
-                          _resizeHController.text = _resizeHeight.toString();
-                        }
-                      });
-                      _updatePreview();
-                    },
-                    onResizeHeightChanged: (v) {
-                      final value = int.tryParse(v.trim());
-                      if (value == null || value <= 0 || _decodedSource == null) return;
-                      setState(() {
-                        _resizeHeight = value;
-                        if (_lockAspectRatio) {
-                          final ratio = _decodedSource!.width / _decodedSource!.height;
-                          _resizeWidth = (_resizeHeight * ratio).round();
-                          _resizeWController.text = _resizeWidth.toString();
-                        }
-                      });
-                      _updatePreview();
-                    },
-                    onCropRatioChanged: (v) {
-                      setState(() => _cropRatio = v);
-                      _updatePreview();
-                    },
-                    onConvertFormatChanged: (v) {
-                      setState(() => _convertFormat = v);
-                      _updatePreview();
-                    },
-                    onCropAspectPreset: widget.tool.id == 'crop'
-                        ? (aw, ah) => _fitCropAspect(aw, ah)
-                        : null,
-                    onCropReset: widget.tool.id == 'crop'
-                        ? () {
-                            setState(() {
-                              _cropL = 0;
-                              _cropT = 0;
-                              _cropR = 1;
-                              _cropB = 1;
-                            });
-                            _updatePreview();
-                          }
-                        : null,
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                if (_success)
-                  Column(
-                    children: [
-                      _SuccessPanel(
-                        title: 'Done',
-                        subtitle: _statusText.isEmpty
-                            ? 'Processed image added to My Files.'
-                            : _statusText,
-                      ),
-                      const SizedBox(height: 10),
-                      _PostJobActions(
-                        filePath: _lastOutputPath,
-                        onOpenMyFiles: () => Navigator.pushNamed(context, '/my-files'),
-                      ),
-                      if ((widget.tool.id == 'resize' || widget.tool.id == 'compress-img') &&
-                          _statInputBytes != null &&
-                          _statOutputBytes != null) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Before: $_statBeforeDims · ${_formatBytesStat(_statInputBytes!)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF334155),
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                'After:  $_statAfterDims · ${_formatBytesStat(_statOutputBytes!)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF1857E6),
-                                ),
-                              ),
-                              if (_statOutputBytes! < _statInputBytes!) ...[
-                                const SizedBox(height: 6),
-                                Text(
-                                  'File size reduced by ${((1 - _statOutputBytes! / _statInputBytes!) * 100).toStringAsFixed(1)}%',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF0F766E),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
-                      if (widget.tool.id == 'remove-bg') ...[
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: () {
-                                  setState(() => _showOriginalPreview = !_showOriginalPreview);
-                                },
-                                style: OutlinedButton.styleFrom(
-                                  side: const BorderSide(color: Color(0xFFCBD5E1)),
-                                  foregroundColor: const Color(0xFF0F172A),
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                                child: Text(
-                                  _showOriginalPreview ? 'Show Removed' : 'Show Original',
-                                  style: const TextStyle(fontWeight: FontWeight.w700),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
+                          ),
+                          const SizedBox(height: 16),
+                          if (_decodedSource != null) ...[
+                            if (_lastErrorCode != null) ...[
+                              _ErrorBanner(
+                                code: _lastErrorCode!,
+                                message: _lastErrorMessage ??
+                                    'Something went wrong.',
+                                onRetry: _decodedSource == null ? null : _start,
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            if (_removeBgUnavailable)
+                              Container(
+                                width: double.infinity,
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFF7ED),
+                                  border: Border.all(
+                                      color: const Color(0xFFFED7AA)),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Text(
+                                  'Remove Background uses on-device ML Kit (Android & iOS only). Works best for photos with people.',
+                                  style: TextStyle(
+                                    color: Color(0xFF9A3412),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            if (widget.tool.id == 'remove-bg' &&
+                                _removedBgCutoutBytes != null) ...[
+                              Container(
+                                width: double.infinity,
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  border: Border.all(
+                                      color: const Color(0xFFE2E8F0)),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Background',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF0F172A),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: [
+                                        ChoiceChip(
+                                          label: const Text('Transparent'),
+                                          selected: _removeBgSolidColor == null,
+                                          onSelected: (_) {
+                                            setState(() {
+                                              _removeBgSolidColor = null;
+                                              _previewBytes =
+                                                  _removeBgOutputBytes();
+                                              _success = false;
+                                              _statusText = '';
+                                            });
+                                          },
+                                        ),
+                                        ..._removeBgPalette.map((c) {
+                                          final selected =
+                                              _removeBgSolidColor == c;
+                                          return InkWell(
+                                            onTap: () {
+                                              setState(() {
+                                                _removeBgSolidColor = c;
+                                                _previewBytes =
+                                                    _removeBgOutputBytes();
+                                                _success = false;
+                                                _statusText = '';
+                                              });
+                                            },
+                                            child: Container(
+                                              width: 30,
+                                              height: 30,
+                                              decoration: BoxDecoration(
+                                                color: c,
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color: selected
+                                                      ? const Color(0xFF1857E6)
+                                                      : const Color(0xFF94A3B8),
+                                                  width: selected ? 3 : 1.5,
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        }),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            _ImageToolControls(
+                              toolId: widget.tool.id,
+                              quality: _quality,
+                              lockAspectRatio: _lockAspectRatio,
+                              resizeWidth: _resizeWidth,
+                              resizeHeight: _resizeHeight,
+                              cropRatio: _cropRatio,
+                              convertFormat: _convertFormat,
+                              onQualityChanged: (v) {
+                                setState(() => _quality = v);
+                                _updatePreview();
+                              },
+                              onAspectLockChanged: (v) {
+                                setState(() {
+                                  _lockAspectRatio = v;
+                                  if (v && _decodedSource != null) {
+                                    final ratio = _decodedSource!.height /
+                                        _decodedSource!.width;
+                                    _resizeHeight =
+                                        (_resizeWidth * ratio).round();
+                                    _resizeHController.text =
+                                        _resizeHeight.toString();
+                                  }
+                                });
+                                _updatePreview();
+                              },
+                              resizeWidthController: _resizeWController,
+                              resizeHeightController: _resizeHController,
+                              onResizeWidthChanged: (v) {
+                                final value = int.tryParse(v.trim());
+                                if (value == null ||
+                                    value <= 0 ||
+                                    _decodedSource == null) {
+                                  return;
+                                }
+                                setState(() {
+                                  _resizeWidth = value;
+                                  if (_lockAspectRatio) {
+                                    final ratio = _decodedSource!.height /
+                                        _decodedSource!.width;
+                                    _resizeHeight =
+                                        (_resizeWidth * ratio).round();
+                                    _resizeHController.text =
+                                        _resizeHeight.toString();
+                                  }
+                                });
+                                _updatePreview();
+                              },
+                              onResizeHeightChanged: (v) {
+                                final value = int.tryParse(v.trim());
+                                if (value == null ||
+                                    value <= 0 ||
+                                    _decodedSource == null) {
+                                  return;
+                                }
+                                setState(() {
+                                  _resizeHeight = value;
+                                  if (_lockAspectRatio) {
+                                    final ratio = _decodedSource!.width /
+                                        _decodedSource!.height;
+                                    _resizeWidth =
+                                        (_resizeHeight * ratio).round();
+                                    _resizeWController.text =
+                                        _resizeWidth.toString();
+                                  }
+                                });
+                                _updatePreview();
+                              },
+                              onCropRatioChanged: (v) {
+                                setState(() => _cropRatio = v);
+                                _updatePreview();
+                              },
+                              onConvertFormatChanged: (v) {
+                                setState(() => _convertFormat = v);
+                                _updatePreview();
+                              },
+                              onCropAspectPreset: widget.tool.id == 'crop'
+                                  ? (aw, ah) => _fitCropAspect(aw, ah)
+                                  : null,
+                              onCropReset: widget.tool.id == 'crop'
+                                  ? () {
+                                      setState(() {
+                                        _cropL = 0;
+                                        _cropT = 0;
+                                        _cropR = 1;
+                                        _cropB = 1;
+                                      });
+                                      _updatePreview();
+                                    }
+                                  : null,
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          if (_success)
+                            Column(
+                              children: [
+                                _SuccessPanel(
+                                  title: 'Done',
+                                  subtitle: _statusText.isEmpty
+                                      ? 'Processed image added to My Files.'
+                                      : _statusText,
+                                ),
+                                const SizedBox(height: 10),
+                                _PostJobActions(
+                                  filePath: _lastOutputPath,
+                                  onOpenMyFiles: () =>
+                                      Navigator.pushNamed(context, '/my-files'),
+                                ),
+                                if ((widget.tool.id == 'resize' ||
+                                        widget.tool.id == 'compress-img') &&
+                                    _statInputBytes != null &&
+                                    _statOutputBytes != null) ...[
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF8FAFC),
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                          color: const Color(0xFFE2E8F0)),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Before: $_statBeforeDims · ${_formatBytesStat(_statInputBytes!)}',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF334155),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'After:  $_statAfterDims · ${_formatBytesStat(_statOutputBytes!)}',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF1857E6),
+                                          ),
+                                        ),
+                                        if (_statOutputBytes! <
+                                            _statInputBytes!) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            'File size reduced by ${((1 - _statOutputBytes! / _statInputBytes!) * 100).toStringAsFixed(1)}%',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              color: Color(0xFF0F766E),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                if (widget.tool.id == 'remove-bg') ...[
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: () {
+                                            setState(() =>
+                                                _showOriginalPreview =
+                                                    !_showOriginalPreview);
+                                          },
+                                          style: OutlinedButton.styleFrom(
+                                            side: const BorderSide(
+                                                color: Color(0xFFCBD5E1)),
+                                            foregroundColor:
+                                                const Color(0xFF0F172A),
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: 12),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            _showOriginalPreview
+                                                ? 'Show Removed'
+                                                : 'Show Original',
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: ElevatedButton(
+                                          onPressed: _lastOutputPath == null
+                                              ? null
+                                              : _downloadPngCopy,
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor:
+                                                const Color(0xFF1857E6),
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: 12),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            'Download PNG',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            )
+                          else
+                            SizedBox(
+                              width: double.infinity,
                               child: ElevatedButton(
-                                onPressed: _lastOutputPath == null ? null : _downloadPngCopy,
+                                onPressed: (_decodedSource == null ||
+                                        _removeBgUnavailable)
+                                    ? null
+                                    : _start,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF1857E6),
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  disabledBackgroundColor:
+                                      const Color(0xFFBFD0F7),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 16),
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
+                                    borderRadius: BorderRadius.circular(16),
                                   ),
                                 ),
-                                child: const Text(
-                                  'Download PNG',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                child: Text(
+                                  _processButtonLabel,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.2,
+                                  ),
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                      ],
-                    ],
-                  )
-                else
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: (_decodedSource == null || _removeBgUnavailable) ? null : _start,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1857E6),
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor: const Color(0xFFBFD0F7),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      child: Text(
-                        _processButtonLabel,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.2,
-                        ),
+                        ],
                       ),
                     ),
                   ),
-                    ],
-                  ),
-                ),
                   if (_processing)
-                    _ProcessingOverlay(message: '${widget.tool.name}...', progress: _progress),
+                    _ProcessingOverlay(
+                        message: '${widget.tool.name}...', progress: _progress),
                 ],
               ),
             ),
@@ -1802,7 +1834,8 @@ class _ImageToolControls extends StatelessWidget {
               color: isDark ? const Color(0xFF1E293B) : Colors.white,
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                color:
+                    isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
               ),
             ),
             child: Row(
@@ -1935,12 +1968,14 @@ class _ImageToolControls extends StatelessWidget {
         children: [
           const Text(
             'JPEG quality',
-            style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF334155)),
+            style: TextStyle(
+                fontWeight: FontWeight.w700, color: Color(0xFF334155)),
           ),
           const SizedBox(height: 4),
           Text(
             '$quality% (lower → smaller file)',
-            style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF1857E6)),
+            style: const TextStyle(
+                fontWeight: FontWeight.w700, color: Color(0xFF1857E6)),
           ),
           Slider(
             value: quality.toDouble(),
@@ -1952,7 +1987,8 @@ class _ImageToolControls extends StatelessWidget {
           ),
           Text(
             'The app lowers quality automatically if the output would still be larger than your original.',
-            style: TextStyle(fontSize: 12, height: 1.35, color: Colors.grey.shade600),
+            style: TextStyle(
+                fontSize: 12, height: 1.35, color: Colors.grey.shade600),
           ),
         ],
       );
@@ -1966,7 +2002,8 @@ class PdfProcessingScreen extends StatefulWidget {
   final ToolOption tool;
   final String apiKey;
 
-  const PdfProcessingScreen({super.key, required this.tool, required this.apiKey});
+  const PdfProcessingScreen(
+      {super.key, required this.tool, required this.apiKey});
 
   @override
   State<PdfProcessingScreen> createState() => _PdfProcessingScreenState();
@@ -1975,7 +2012,8 @@ class PdfProcessingScreen extends StatefulWidget {
 class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
   final PdfToolsService _pdfService = const PdfToolsService();
   final List<fp.PlatformFile> _files = [];
-  /// Path on disk for Open (written to temp if picker only returns bytes).
+
+  /// Path on disk used by in-app PDF viewer.
   String? _pdfPathForOpen;
   bool _processing = false;
   bool _success = false;
@@ -1986,6 +2024,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
   String? _errorMessage;
   String? _lastOutputPath;
   int _sourcePageCount = 0;
+  int? _beforeBytes;
+  int? _afterBytes;
   Timer? _timer;
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _rangeController = TextEditingController();
@@ -2001,9 +2041,27 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
     if (f.bytes == null) return null;
     final dir = await getTemporaryDirectory();
     final safe = f.name.replaceAll(RegExp(r'[^\w\-\.]'), '_');
-    final path = '${dir.path}/pdf_pick_${DateTime.now().millisecondsSinceEpoch}_$safe';
+    final path =
+        '${dir.path}/pdf_pick_${DateTime.now().millisecondsSinceEpoch}_$safe';
     await File(path).writeAsBytes(f.bytes!, flush: true);
     return path;
+  }
+
+  Future<Uint8List?> _readFileBytes(fp.PlatformFile f) async {
+    if (f.bytes != null) return f.bytes!;
+    if (f.path == null) return null;
+    final file = File(f.path!);
+    if (!await file.exists()) return null;
+    return await file.readAsBytes();
+  }
+
+  Future<int?> _readFileSize(fp.PlatformFile f) async {
+    if (f.size > 0) return f.size;
+    if (f.bytes != null) return f.bytes!.lengthInBytes;
+    if (f.path == null) return null;
+    final file = File(f.path!);
+    if (!await file.exists()) return null;
+    return await file.length();
   }
 
   Future<void> _pick() async {
@@ -2012,25 +2070,32 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
     final result = await fp.FilePicker.platform.pickFiles(
       allowMultiple: isMerge,
       type: fp.FileType.custom,
-      allowedExtensions: isOcr ? ['pdf', 'png', 'jpg', 'jpeg', 'webp'] : ['pdf'],
-      withData: true,
+      allowedExtensions:
+          isOcr ? ['pdf', 'png', 'jpg', 'jpeg', 'webp'] : ['pdf'],
+      withData: isOcr,
     );
     if (result == null || result.files.isEmpty) return;
-    final oversized = result.files.any((f) {
-      final b = f.bytes;
-      return b != null && b.lengthInBytes > _maxPdfInputBytes;
-    });
+    bool oversized = false;
+    for (final f in result.files) {
+      final size = await _readFileSize(f);
+      if (size != null && size > _maxPdfInputBytes) {
+        oversized = true;
+        break;
+      }
+    }
     if (oversized) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('One or more files are over 50MB. Please use smaller PDFs.')),
+        const SnackBar(
+            content: Text(
+                'One or more files are over 50MB. Please use smaller PDFs.')),
       );
       return;
     }
 
     int pages = 0;
     try {
-      final firstBytes = result.files.first.bytes;
+      final firstBytes = await _readFileBytes(result.files.first);
       if (firstBytes != null && !isOcr) {
         pages = _pdfService.pageCount(firstBytes);
       }
@@ -2054,9 +2119,22 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
       _ocrText = '';
       _sourcePageCount = pages;
       _statusText = '';
+      _beforeBytes = null;
+      _afterBytes = null;
       _errorCode = null;
       _errorMessage = null;
     });
+  }
+
+  String _formatBytes(int bytes) {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    double size = bytes.toDouble();
+    var unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit++;
+    }
+    return '${size.toStringAsFixed(unit == 0 ? 0 : 1)} ${units[unit]}';
   }
 
   Future<void> _showVisualPagePicker() async {
@@ -2090,7 +2168,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
                           : toolId == 'split'
                               ? 'Only selected pages will be in the new file.'
                               : 'Only selected pages will be rotated.',
-                      style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                      style: const TextStyle(
+                          fontSize: 13, color: Color(0xFF64748B)),
                     ),
                     const SizedBox(height: 12),
                     ...List.generate(_sourcePageCount, (i) {
@@ -2114,7 +2193,9 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
                 ),
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Cancel')),
                 FilledButton(
                   onPressed: () => Navigator.pop(ctx, selected),
                   child: const Text('Apply'),
@@ -2209,14 +2290,15 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
     if (widget.tool.id == 'ocr') {
       try {
         final file = _files.first;
-        if (file.bytes == null) {
+        final inputBytes = await _readFileBytes(file);
+        if (inputBytes == null) {
           throw Exception('Cannot read selected file bytes');
         }
         final ext = (file.extension ?? '').toLowerCase();
         const ocr = OcrService();
         final text = ext == 'pdf'
-            ? ocr.extractFromPdf(file.bytes!)
-            : await ocr.extractFromImage(file.bytes!);
+            ? ocr.extractFromPdf(inputBytes)
+            : await ocr.extractFromImage(inputBytes);
         if (text.trim().isEmpty) {
           throw Exception('NO_TEXT');
         }
@@ -2228,7 +2310,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
           _errorCode = null;
           _errorMessage = null;
         });
-        AnalyticsService.logEvent('tool_success', props: {'tool_id': widget.tool.id});
+        AnalyticsService.logEvent('tool_success',
+            props: {'tool_id': widget.tool.id});
       } catch (_) {
         if (!mounted) return;
         setState(() => _processing = false);
@@ -2239,10 +2322,12 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('OCR found no text. Try a clearer image/PDF and retry.'),
+            content:
+                Text('OCR found no text. Try a clearer image/PDF and retry.'),
           ),
         );
-        AnalyticsService.logEvent('tool_fail', props: {'tool_id': widget.tool.id, 'code': 'OCR_FAIL'});
+        AnalyticsService.logEvent('tool_fail',
+            props: {'tool_id': widget.tool.id, 'code': 'OCR_FAIL'});
       }
       return;
     }
@@ -2259,15 +2344,19 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
 
     try {
       Uint8List outputBytes;
+      int? originalBytes;
       if (widget.tool.id == 'merge') {
-        final all = _files
-            .map((f) => f.bytes)
-            .whereType<Uint8List>()
-            .toList(growable: false);
+        final all = <Uint8List>[];
+        for (final f in _files) {
+          final b = await _readFileBytes(f);
+          if (b != null) all.add(b);
+        }
+        if (all.isEmpty) throw Exception('No file bytes');
         outputBytes = _pdfService.merge(all);
       } else {
-        final src = _files.first.bytes;
+        final src = await _readFileBytes(_files.first);
         if (src == null) throw Exception('No file bytes');
+        originalBytes = src.lengthInBytes;
         final pageCount = _pdfService.pageCount(src);
         switch (widget.tool.id) {
           case 'split':
@@ -2289,7 +2378,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
             );
             break;
           case 'rotate':
-            final selectedPages = _parsePageSet(_rangeController.text, pageCount);
+            final selectedPages =
+                _parsePageSet(_rangeController.text, pageCount);
             outputBytes = selectedPages.length == pageCount
                 ? _pdfService.rotateAll(src, _rotation)
                 : _pdfService.rotateSelected(src, _rotation, selectedPages);
@@ -2301,7 +2391,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
             if (_passwordController.text.trim().isEmpty) {
               throw Exception('Password is required');
             }
-            outputBytes = _pdfService.passwordProtect(src, _passwordController.text.trim());
+            outputBytes = _pdfService.passwordProtect(
+                src, _passwordController.text.trim());
             break;
           default:
             throw Exception('Unsupported PDF tool');
@@ -2327,22 +2418,90 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
         _success = true;
         _statusText = 'Saved to My Files';
         _lastOutputPath = path;
+        if (widget.tool.id == 'compress-pdf') {
+          _beforeBytes = originalBytes;
+          _afterBytes = outputBytes.lengthInBytes;
+        } else {
+          _beforeBytes = null;
+          _afterBytes = null;
+        }
         _errorCode = null;
         _errorMessage = null;
       });
-      AnalyticsService.logEvent('tool_success', props: {'tool_id': widget.tool.id});
+      AnalyticsService.logEvent('tool_success',
+          props: {'tool_id': widget.tool.id});
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _processing = false;
         _statusText = 'Failed to process PDF';
+        _beforeBytes = null;
+        _afterBytes = null;
         _errorCode = 'PDF_PROCESS_FAIL';
-        _errorMessage = 'Could not process this PDF. Verify file/pages and try again.';
+        _errorMessage =
+            'Could not process this PDF. Verify file/pages and try again.';
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not process this PDF. Verify file/pages and try again.')),
+        const SnackBar(
+            content: Text(
+                'Could not process this PDF. Verify file/pages and try again.')),
       );
-      AnalyticsService.logEvent('tool_fail', props: {'tool_id': widget.tool.id, 'code': 'PDF_PROCESS_FAIL'});
+      AnalyticsService.logEvent('tool_fail',
+          props: {'tool_id': widget.tool.id, 'code': 'PDF_PROCESS_FAIL'});
+    }
+  }
+
+  Future<void> _saveOcrAsPdf() async {
+    if (_ocrText.trim().isEmpty) return;
+    final textDoc = PdfDocument();
+    try {
+      final page = textDoc.pages.add();
+      final font = PdfStandardFont(PdfFontFamily.helvetica, 11);
+      page.graphics.drawString(
+        _ocrText,
+        font,
+        bounds: Rect.fromLTWH(0, 0, page.size.width, page.size.height),
+      );
+      final textBytes = Uint8List.fromList(textDoc.saveSync());
+
+      Uint8List outputBytes = textBytes;
+      final first = _files.isNotEmpty ? _files.first : null;
+      final firstExt = (first?.extension ?? '').toLowerCase();
+      // For OCR on PDFs, keep original pages and append copyable OCR text pages.
+      final firstBytes = first == null ? null : await _readFileBytes(first);
+      if (first != null && firstExt == 'pdf' && firstBytes != null) {
+        outputBytes = _pdfService.merge([firstBytes, textBytes]);
+      }
+
+      final path = await _savePdfOutput(outputBytes, 'ocr_text');
+      FileStore.addFile(
+        FileItem(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          name: path.split('/').last,
+          type: FileType.pdf,
+          date: 'Just now',
+          path: path,
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _lastOutputPath = path;
+        _success = true;
+        _statusText = (first != null && firstExt == 'pdf')
+            ? 'Original PDF + OCR text PDF saved'
+            : 'OCR text PDF saved to My Files';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            (first != null && firstExt == 'pdf')
+                ? 'Saved hybrid PDF (original + copyable OCR text)'
+                : 'OCR text PDF saved',
+          ),
+        ),
+      );
+    } finally {
+      textDoc.dispose();
     }
   }
 
@@ -2376,215 +2535,294 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
                       16,
                       16 + MediaQuery.of(context).padding.bottom,
                     ),
-                  children: [
-              if (_errorCode != null) ...[
-                _ErrorBanner(
-                  code: _errorCode!,
-                  message: _errorMessage ?? 'Something went wrong.',
-                  onRetry: _files.isEmpty ? null : _process,
-                ),
-                const SizedBox(height: 12),
-              ],
-              OutlinedButton.icon(
-                onPressed: _pick,
-                icon: const Icon(Icons.upload_file_rounded),
-                label: Text(widget.tool.id == 'merge' ? 'Add PDF Files' : 'Select File'),
-              ),
-              const SizedBox(height: 12),
-              ..._files.map(
-                (file) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.picture_as_pdf_rounded, color: Colors.red),
-                  title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-              ),
-              if (_pdfPathForOpen != null) ...[
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: () async => OpenFilex.open(_pdfPathForOpen!),
-                    icon: const Icon(Icons.open_in_new_rounded),
-                    label: const Text('Open in another app'),
+                    children: [
+                      if (_errorCode != null) ...[
+                        _ErrorBanner(
+                          code: _errorCode!,
+                          message: _errorMessage ?? 'Something went wrong.',
+                          onRetry: _files.isEmpty ? null : _process,
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      OutlinedButton.icon(
+                        onPressed: _pick,
+                        icon: const Icon(Icons.upload_file_rounded),
+                        label: Text(widget.tool.id == 'merge'
+                            ? 'Add PDF Files'
+                            : 'Select File'),
+                      ),
+                      const SizedBox(height: 12),
+                      ..._files.asMap().entries.map(
+                            (entry) => ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (widget.tool.id == 'merge')
+                                    Container(
+                                      width: 24,
+                                      height: 24,
+                                      alignment: Alignment.center,
+                                      margin: const EdgeInsets.only(right: 8),
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF1857E6),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Text(
+                                        '${entry.key + 1}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  const Icon(Icons.picture_as_pdf_rounded,
+                                      color: Colors.red),
+                                ],
+                              ),
+                              title: Text(entry.value.name,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ),
+                          ),
+                      if (widget.tool.id != 'merge' &&
+                          _files.isNotEmpty &&
+                          (_files.first.extension ?? '').toLowerCase() ==
+                              'pdf') ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          widget.tool.id == 'ocr'
+                              ? 'Document preview'
+                              : 'Reader',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 15),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: widget.tool.id == 'ocr' ? 360 : 420,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: (_pdfPathForOpen != null &&
+                                    File(_pdfPathForOpen!).existsSync())
+                                ? SfPdfViewer.file(
+                                    File(_pdfPathForOpen!),
+                                    interactionMode: PdfInteractionMode.pan,
+                                    pageLayoutMode:
+                                        PdfPageLayoutMode.continuous,
+                                    scrollDirection:
+                                        PdfScrollDirection.vertical,
+                                    canShowScrollHead: true,
+                                    canShowScrollStatus: true,
+                                  )
+                                : (_files.first.bytes != null
+                                    ? SfPdfViewer.memory(
+                                        _files.first.bytes!,
+                                        interactionMode: PdfInteractionMode.pan,
+                                        pageLayoutMode:
+                                            PdfPageLayoutMode.continuous,
+                                        scrollDirection:
+                                            PdfScrollDirection.vertical,
+                                        canShowScrollHead: true,
+                                        canShowScrollStatus: true,
+                                      )
+                                    : const Center(
+                                        child: Text(
+                                          'Preview unavailable for this file.',
+                                        ),
+                                      )),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (_sourcePageCount > 0 &&
+                          widget.tool.id != 'merge' &&
+                          widget.tool.id != 'ocr') ...[
+                        Text(
+                          'Pages detected: $_sourcePageCount',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF64748B)),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      if (widget.tool.id == 'split' ||
+                          widget.tool.id == 'delete') ...[
+                        TextField(
+                          controller: _rangeController,
+                          decoration: InputDecoration(
+                            border: const OutlineInputBorder(),
+                            labelText: widget.tool.id == 'split'
+                                ? 'Pages to extract (e.g. 1-3,5)'
+                                : 'Pages to delete (e.g. 2,4-6)',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton.icon(
+                            onPressed: _sourcePageCount > 0
+                                ? _showVisualPagePicker
+                                : null,
+                            icon: const Icon(Icons.touch_app_outlined),
+                            label: const Text('Choose pages visually'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (widget.tool.id == 'rearrange') ...[
+                        TextField(
+                          controller: _orderController,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            labelText: 'Page order (e.g. 3,1,2,4)',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (widget.tool.id == 'password') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _passwordController,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            labelText: 'Set Password',
+                          ),
+                        ),
+                      ],
+                      if (widget.tool.id == 'compress-pdf') ...[
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<PdfCompressionLevel>(
+                          value: _compression,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            labelText: 'Compression level',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: PdfCompressionLevel.belowNormal,
+                              child: Text('Low'),
+                            ),
+                            DropdownMenuItem(
+                              value: PdfCompressionLevel.normal,
+                              child: Text('Balanced'),
+                            ),
+                            DropdownMenuItem(
+                              value: PdfCompressionLevel.aboveNormal,
+                              child: Text('High'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) setState(() => _compression = v);
+                          },
+                        ),
+                      ],
+                      if (widget.tool.id == 'rotate') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _rangeController,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            labelText:
+                                'Pages to rotate (e.g. 2,4-6) • leave empty for all',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton.icon(
+                            onPressed: _sourcePageCount > 0
+                                ? _showVisualPagePicker
+                                : null,
+                            icon: const Icon(Icons.touch_app_outlined),
+                            label: const Text('Choose pages visually'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<PdfPageRotateAngle>(
+                          value: _rotation,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            labelText: 'Rotate angle',
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: PdfPageRotateAngle.rotateAngle90,
+                              child: Text('90°'),
+                            ),
+                            DropdownMenuItem(
+                              value: PdfPageRotateAngle.rotateAngle180,
+                              child: Text('180°'),
+                            ),
+                            DropdownMenuItem(
+                              value: PdfPageRotateAngle.rotateAngle270,
+                              child: Text('270°'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) setState(() => _rotation = v);
+                          },
+                        ),
+                      ],
+                      if (_ocrText.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Extracted text',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 15),
+                        ),
+                        const SizedBox(height: 8),
+                        SelectableText(_ocrText),
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: FilledButton.icon(
+                            onPressed: _saveOcrAsPdf,
+                            icon: const Icon(Icons.picture_as_pdf_outlined),
+                            label: const Text('Save hybrid OCR PDF'),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      if (_success)
+                        Column(
+                          children: [
+                            _SuccessPanel(
+                              title: 'PDF processed',
+                              subtitle: _statusText.isEmpty
+                                  ? 'Output saved to My Files.'
+                                  : _statusText,
+                            ),
+                            const SizedBox(height: 10),
+                            _PostJobActions(
+                              filePath: _lastOutputPath,
+                              onOpenMyFiles: () =>
+                                  Navigator.pushNamed(context, '/my-files'),
+                            ),
+                            if (widget.tool.id == 'compress-pdf' &&
+                                _beforeBytes != null &&
+                                _afterBytes != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                'Before: ${_formatBytes(_beforeBytes!)}  •  After: ${_formatBytes(_afterBytes!)}',
+                                style: const TextStyle(
+                                  color: Color(0xFF475569),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ],
+                        )
+                      else
+                        ElevatedButton(
+                          onPressed: _files.isEmpty ? null : _process,
+                          child: Text('Process ${widget.tool.name}'),
+                        ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 8),
-              ],
-              if (widget.tool.id != 'merge' &&
-                  _files.isNotEmpty &&
-                  (_files.first.extension ?? '').toLowerCase() == 'pdf' &&
-                  _files.first.bytes != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  widget.tool.id == 'ocr' ? 'Document preview' : 'Reader',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: widget.tool.id == 'ocr' ? 360 : 420,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: SfPdfViewer.memory(
-                      _files.first.bytes!,
-                      canShowScrollHead: false,
-                      canShowScrollStatus: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (_sourcePageCount > 0 && widget.tool.id != 'merge' && widget.tool.id != 'ocr') ...[
-                Text(
-                  'Pages detected: $_sourcePageCount',
-                  style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (widget.tool.id == 'split' || widget.tool.id == 'delete') ...[
-                TextField(
-                  controller: _rangeController,
-                  decoration: InputDecoration(
-                    border: const OutlineInputBorder(),
-                    labelText: widget.tool.id == 'split'
-                        ? 'Pages to extract (e.g. 1-3,5)'
-                        : 'Pages to delete (e.g. 2,4-6)',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: _sourcePageCount > 0 ? _showVisualPagePicker : null,
-                    icon: const Icon(Icons.touch_app_outlined),
-                    label: const Text('Choose pages visually'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (widget.tool.id == 'rearrange') ...[
-                TextField(
-                  controller: _orderController,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Page order (e.g. 3,1,2,4)',
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (widget.tool.id == 'password') ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Set Password',
-                  ),
-                ),
-              ],
-              if (widget.tool.id == 'compress-pdf') ...[
-                const SizedBox(height: 12),
-                DropdownButtonFormField<PdfCompressionLevel>(
-                  value: _compression,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Compression level',
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: PdfCompressionLevel.belowNormal,
-                      child: Text('Low'),
-                    ),
-                    DropdownMenuItem(
-                      value: PdfCompressionLevel.normal,
-                      child: Text('Balanced'),
-                    ),
-                    DropdownMenuItem(
-                      value: PdfCompressionLevel.aboveNormal,
-                      child: Text('High'),
-                    ),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _compression = v);
-                  },
-                ),
-              ],
-              if (widget.tool.id == 'rotate') ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _rangeController,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Pages to rotate (e.g. 2,4-6) • leave empty for all',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: _sourcePageCount > 0 ? _showVisualPagePicker : null,
-                    icon: const Icon(Icons.touch_app_outlined),
-                    label: const Text('Choose pages visually'),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<PdfPageRotateAngle>(
-                  value: _rotation,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Rotate angle',
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: PdfPageRotateAngle.rotateAngle90,
-                      child: Text('90°'),
-                    ),
-                    DropdownMenuItem(
-                      value: PdfPageRotateAngle.rotateAngle180,
-                      child: Text('180°'),
-                    ),
-                    DropdownMenuItem(
-                      value: PdfPageRotateAngle.rotateAngle270,
-                      child: Text('270°'),
-                    ),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _rotation = v);
-                  },
-                ),
-              ],
-              if (_ocrText.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  'Extracted text',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                ),
-                const SizedBox(height: 8),
-                SelectableText(_ocrText),
-              ],
-              const SizedBox(height: 16),
-              if (_success)
-                Column(
-                  children: [
-                    _SuccessPanel(
-                      title: 'PDF processed',
-                      subtitle: _statusText.isEmpty ? 'Output saved to My Files.' : _statusText,
-                    ),
-                    const SizedBox(height: 10),
-                    _PostJobActions(
-                      filePath: _lastOutputPath,
-                      onOpenMyFiles: () => Navigator.pushNamed(context, '/my-files'),
-                    ),
-                  ],
-                )
-              else
-                ElevatedButton(
-                  onPressed: _files.isEmpty ? null : _process,
-                  child: Text('Process ${widget.tool.name}'),
-                ),
-                  ],
-                ),
                   if (_processing)
-                    _ProcessingOverlay(message: '${widget.tool.name}...', progress: _progress),
+                    _ProcessingOverlay(
+                        message: '${widget.tool.name}...', progress: _progress),
                 ],
               ),
             ),
@@ -2614,6 +2852,39 @@ class MyFilesScreen extends StatelessWidget {
     }
   }
 
+  static Future<void> _promptOpenFile(
+      BuildContext context, FileItem file) async {
+    final path = file.path;
+    if (path == null || path.isEmpty) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This item has no file path to open.')),
+      );
+      return;
+    }
+    if (!context.mounted) return;
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Open file'),
+        content: Text('Open "${file.name}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Open'),
+          ),
+        ],
+      ),
+    );
+    if (open == true && context.mounted) {
+      await OpenFilex.open(path);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -2637,174 +2908,255 @@ class MyFilesScreen extends StatelessWidget {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, index) {
                     final file = files[index];
-                    return Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
                         borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Row(
-                        children: [
-                    if (file.thumbnailPath != null && file.thumbnailPath!.isNotEmpty && File(file.thumbnailPath!).existsSync())
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.file(
-                          File(file.thumbnailPath!),
-                          width: 38,
-                          height: 38,
-                          fit: BoxFit.cover,
-                        ),
-                      )
-                    else
-                      const Icon(Icons.insert_drive_file_outlined),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          Text(
-                            file.type.name.toUpperCase(),
-                            style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        onTap: () => _promptOpenFile(context, file),
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color:
+                                isDark ? const Color(0xFF1E293B) : Colors.white,
+                            borderRadius: BorderRadius.circular(14),
                           ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'More',
-                      icon: const Icon(Icons.more_vert_rounded),
-                      onPressed: () {
-                        showModalBottomSheet<void>(
-                          context: context,
-                          showDragHandle: true,
-                          builder: (ctx) {
-                            final hasPath = file.path != null && file.path!.isNotEmpty;
-                            final canShowFolder = hasPath && (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
-                            return SafeArea(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  ListTile(
-                                    leading: const Icon(Icons.open_in_new_rounded),
-                                    title: const Text('Open'),
-                                    enabled: hasPath,
-                                    onTap: !hasPath
-                                        ? null
-                                        : () async {
-                                            Navigator.of(ctx).pop();
-                                            await OpenFilex.open(file.path!);
-                                          },
+                          child: Row(
+                            children: [
+                              if (file.thumbnailPath != null &&
+                                  file.thumbnailPath!.isNotEmpty &&
+                                  File(file.thumbnailPath!).existsSync())
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.file(
+                                    File(file.thumbnailPath!),
+                                    width: 38,
+                                    height: 38,
+                                    fit: BoxFit.cover,
                                   ),
-                                  ListTile(
-                                    leading: const Icon(Icons.share_outlined),
-                                    title: const Text('Share'),
-                                    onTap: () async {
-                                      Navigator.of(ctx).pop();
-                                      if (hasPath) {
-                                        await SharePlus.instance.share(
-                                          ShareParams(files: [XFile(file.path!)]),
-                                        );
-                                      } else if (file.content != null && file.content!.trim().isNotEmpty) {
-                                        await SharePlus.instance.share(
-                                          ShareParams(text: file.content!),
-                                        );
-                                      } else {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Nothing to share yet.')),
-                                        );
-                                      }
-                                    },
-                                  ),
-                                  ListTile(
-                                    leading: const Icon(Icons.drive_file_rename_outline_rounded),
-                                    title: const Text('Rename'),
-                                    onTap: () async {
-                                      Navigator.of(ctx).pop();
-                                      final c = TextEditingController(text: file.name);
-                                      final renamed = await showDialog<String>(
-                                        context: context,
-                                        builder: (dialogCtx) => AlertDialog(
-                                          title: const Text('Rename file'),
-                                          content: TextField(
-                                            controller: c,
-                                            decoration: const InputDecoration(labelText: 'File name'),
-                                          ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () => Navigator.of(dialogCtx).pop(),
-                                              child: const Text('Cancel'),
+                                )
+                              else
+                                const Icon(Icons.insert_drive_file_outlined),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(file.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis),
+                                    Text(
+                                      file.type.name.toUpperCase(),
+                                      style: const TextStyle(
+                                          fontSize: 12, color: Colors.grey),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'More',
+                                icon: const Icon(Icons.more_vert_rounded),
+                                onPressed: () {
+                                  showModalBottomSheet<void>(
+                                    context: context,
+                                    showDragHandle: true,
+                                    builder: (ctx) {
+                                      final hasPath = file.path != null &&
+                                          file.path!.isNotEmpty;
+                                      final canShowFolder = hasPath &&
+                                          (Platform.isMacOS ||
+                                              Platform.isWindows ||
+                                              Platform.isLinux);
+                                      return SafeArea(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            ListTile(
+                                              leading: const Icon(
+                                                  Icons.open_in_new_rounded),
+                                              title: const Text('Open'),
+                                              enabled: hasPath,
+                                              onTap: !hasPath
+                                                  ? null
+                                                  : () async {
+                                                      Navigator.of(ctx).pop();
+                                                      await OpenFilex.open(
+                                                          file.path!);
+                                                    },
                                             ),
-                                            FilledButton(
-                                              onPressed: () => Navigator.of(dialogCtx).pop(c.text.trim()),
-                                              child: const Text('Save'),
+                                            ListTile(
+                                              leading: const Icon(
+                                                  Icons.share_outlined),
+                                              title: const Text('Share'),
+                                              onTap: () async {
+                                                Navigator.of(ctx).pop();
+                                                if (hasPath) {
+                                                  await SharePlus.instance
+                                                      .share(
+                                                    ShareParams(files: [
+                                                      XFile(file.path!)
+                                                    ]),
+                                                  );
+                                                } else if (file.content !=
+                                                        null &&
+                                                    file.content!
+                                                        .trim()
+                                                        .isNotEmpty) {
+                                                  await SharePlus.instance
+                                                      .share(
+                                                    ShareParams(
+                                                        text: file.content!),
+                                                  );
+                                                } else {
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(
+                                                    const SnackBar(
+                                                        content: Text(
+                                                            'Nothing to share yet.')),
+                                                  );
+                                                }
+                                              },
                                             ),
+                                            ListTile(
+                                              leading: const Icon(Icons
+                                                  .drive_file_rename_outline_rounded),
+                                              title: const Text('Rename'),
+                                              onTap: () async {
+                                                Navigator.of(ctx).pop();
+                                                final c = TextEditingController(
+                                                    text: file.name);
+                                                final renamed =
+                                                    await showDialog<String>(
+                                                  context: context,
+                                                  builder: (dialogCtx) =>
+                                                      AlertDialog(
+                                                    title: const Text(
+                                                        'Rename file'),
+                                                    content: TextField(
+                                                      controller: c,
+                                                      decoration:
+                                                          const InputDecoration(
+                                                              labelText:
+                                                                  'File name'),
+                                                    ),
+                                                    actions: [
+                                                      TextButton(
+                                                        onPressed: () =>
+                                                            Navigator.of(
+                                                                    dialogCtx)
+                                                                .pop(),
+                                                        child: const Text(
+                                                            'Cancel'),
+                                                      ),
+                                                      FilledButton(
+                                                        onPressed: () =>
+                                                            Navigator.of(
+                                                                    dialogCtx)
+                                                                .pop(c.text
+                                                                    .trim()),
+                                                        child:
+                                                            const Text('Save'),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                                if (renamed == null ||
+                                                    renamed.isEmpty) {
+                                                  return;
+                                                }
+                                                if (!hasPath) {
+                                                  FileStore.renameById(
+                                                      file.id, renamed);
+                                                  return;
+                                                }
+                                                final oldFile =
+                                                    File(file.path!);
+                                                final extMatch = RegExp(
+                                                        r'(\.[a-zA-Z0-9]+)$')
+                                                    .firstMatch(oldFile.path);
+                                                final ext =
+                                                    extMatch?.group(1) ?? '';
+                                                final safeName =
+                                                    renamed.replaceAll(
+                                                        RegExp(r'[\\/:*?"<>|]'),
+                                                        '_');
+                                                final newPath =
+                                                    '${oldFile.parent.path}/$safeName$ext';
+                                                try {
+                                                  await oldFile.rename(newPath);
+                                                  FileStore.updateById(
+                                                    id: file.id,
+                                                    newName: '$safeName$ext',
+                                                    newPath: newPath,
+                                                  );
+                                                } catch (_) {
+                                                  FileStore.renameById(
+                                                      file.id, renamed);
+                                                }
+                                              },
+                                            ),
+                                            ListTile(
+                                              leading: const Icon(
+                                                  Icons.copy_rounded),
+                                              title:
+                                                  const Text('Copy file path'),
+                                              enabled: hasPath,
+                                              onTap: !hasPath
+                                                  ? null
+                                                  : () async {
+                                                      Navigator.of(ctx).pop();
+                                                      await Clipboard.setData(
+                                                          ClipboardData(
+                                                              text:
+                                                                  file.path!));
+                                                      if (!context.mounted) {
+                                                        return;
+                                                      }
+                                                      ScaffoldMessenger.of(
+                                                              context)
+                                                          .showSnackBar(
+                                                        const SnackBar(
+                                                            content: Text(
+                                                                'Path copied')),
+                                                      );
+                                                    },
+                                            ),
+                                            if (canShowFolder)
+                                              ListTile(
+                                                leading: const Icon(
+                                                    Icons.folder_open_outlined),
+                                                title: const Text(
+                                                    'Open containing folder'),
+                                                onTap: () async {
+                                                  Navigator.of(ctx).pop();
+                                                  await _showInFolder(
+                                                      file.path!);
+                                                },
+                                              ),
+                                            const Divider(height: 1),
+                                            ListTile(
+                                              leading: const Icon(
+                                                  Icons.delete_outline_rounded,
+                                                  color: Colors.red),
+                                              title: const Text(
+                                                  'Remove from list',
+                                                  style: TextStyle(
+                                                      color: Colors.red)),
+                                              onTap: () {
+                                                Navigator.of(ctx).pop();
+                                                FileStore.removeById(file.id);
+                                              },
+                                            ),
+                                            const SizedBox(height: 8),
                                           ],
                                         ),
                                       );
-                                      if (renamed == null || renamed.isEmpty) return;
-                                      if (!hasPath) {
-                                        FileStore.renameById(file.id, renamed);
-                                        return;
-                                      }
-                                      final oldFile = File(file.path!);
-                                      final extMatch = RegExp(r'(\.[a-zA-Z0-9]+)$').firstMatch(oldFile.path);
-                                      final ext = extMatch?.group(1) ?? '';
-                                      final safeName = renamed.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-                                      final newPath = '${oldFile.parent.path}/$safeName$ext';
-                                      try {
-                                        await oldFile.rename(newPath);
-                                        FileStore.updateById(
-                                          id: file.id,
-                                          newName: '$safeName$ext',
-                                          newPath: newPath,
-                                        );
-                                      } catch (_) {
-                                        FileStore.renameById(file.id, renamed);
-                                      }
                                     },
-                                  ),
-                                  ListTile(
-                                    leading: const Icon(Icons.copy_rounded),
-                                    title: const Text('Copy file path'),
-                                    enabled: hasPath,
-                                    onTap: !hasPath
-                                        ? null
-                                        : () async {
-                                            Navigator.of(ctx).pop();
-                                            await Clipboard.setData(ClipboardData(text: file.path!));
-                                            if (!context.mounted) return;
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text('Path copied')),
-                                            );
-                                          },
-                                  ),
-                                  if (canShowFolder)
-                                    ListTile(
-                                      leading: const Icon(Icons.folder_open_outlined),
-                                      title: const Text('Open containing folder'),
-                                      onTap: () async {
-                                        Navigator.of(ctx).pop();
-                                        await _showInFolder(file.path!);
-                                      },
-                                    ),
-                                  const Divider(height: 1),
-                                  ListTile(
-                                    leading: const Icon(Icons.delete_outline_rounded, color: Colors.red),
-                                    title: const Text('Remove from list', style: TextStyle(color: Colors.red)),
-                                    onTap: () {
-                                      Navigator.of(ctx).pop();
-                                      FileStore.removeById(file.id);
-                                    },
-                                  ),
-                                  const SizedBox(height: 8),
-                                ],
+                                  );
+                                },
                               ),
-                            );
-                          },
-                        );
-                      },
-                    ),
-                        ],
+                            ],
+                          ),
+                        ),
                       ),
                     );
                   },
@@ -2903,7 +3255,8 @@ class _SuccessPanel extends StatelessWidget {
               color: const Color(0xFFDCFCE7),
               borderRadius: BorderRadius.circular(999),
             ),
-            child: const Icon(Icons.check_circle_rounded, size: 34, color: Color(0xFF16A34A)),
+            child: const Icon(Icons.check_circle_rounded,
+                size: 34, color: Color(0xFF16A34A)),
           ),
           const SizedBox(height: 10),
           Text(
@@ -3077,7 +3430,8 @@ class _ToolListTileState extends State<_ToolListTile> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(22),
               border: Border.all(
-                color: isDark ? const Color(0xFF334155) : const Color(0xFFE7EBF2),
+                color:
+                    isDark ? const Color(0xFF334155) : const Color(0xFFE7EBF2),
               ),
               boxShadow: const [
                 BoxShadow(
@@ -3095,7 +3449,8 @@ class _ToolListTileState extends State<_ToolListTile> {
                     color: const Color(0xFF1857E6).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(widget.tool.icon, size: 22, color: const Color(0xFF1857E6)),
+                  child: Icon(widget.tool.icon,
+                      size: 22, color: const Color(0xFF1857E6)),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -3106,14 +3461,17 @@ class _ToolListTileState extends State<_ToolListTile> {
                         widget.tool.name,
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          color:
+                              isDark ? Colors.white : const Color(0xFF0F172A),
                         ),
                       ),
                       const SizedBox(height: 6),
                       Row(
                         children: [
                           _CapabilityChip(
-                            label: widget.tool.requiresInternet ? 'Online' : 'Offline',
+                            label: widget.tool.requiresInternet
+                                ? 'Online'
+                                : 'Offline',
                             color: widget.tool.requiresInternet
                                 ? const Color(0xFFEA580C)
                                 : const Color(0xFF16A34A),
@@ -3135,7 +3493,8 @@ class _ToolListTileState extends State<_ToolListTile> {
                     ],
                   ),
                 ),
-                const Icon(Icons.chevron_right_rounded, color: Color(0xFF94A3B8)),
+                const Icon(Icons.chevron_right_rounded,
+                    color: Color(0xFF94A3B8)),
               ],
             ),
           ),

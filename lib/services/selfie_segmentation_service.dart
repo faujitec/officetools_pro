@@ -53,19 +53,65 @@ class SelfieSegmentationService {
     final w = source.width;
     final h = source.height;
     final out = img.Image(width: w, height: h, numChannels: 4);
+    final alpha = List<double>.filled(w * h, 0);
 
+    // Build a confidence/alpha map first so we can smooth it and avoid
+    // rough outlines / edge halos around hair and clothes.
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        final conf = _confidenceAt(mask, x, y, w, h);
+        alpha[y * w + x] = conf.clamp(0.0, 1.0);
+      }
+    }
+
+    final blurred = _boxBlur3x3(alpha, w, h);
+    const low = 0.22;
+    const high = 0.88;
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
         final p = source.getPixel(x, y);
-        final conf = _confidenceAt(mask, x, y, w, h);
-        // Slightly lift mid-tones for softer hair/edges; raw-size mask keeps detail.
-        final shaped = math.pow(conf.clamp(0.0, 1.0), 0.78).toDouble();
-        final a = (shaped * 255).round().clamp(0, 255);
-        out.setPixelRgba(x, y, p.r, p.g, p.b, a);
+        final a0 = blurred[y * w + x];
+        final a = _smoothstep(low, high, a0);
+        final ia = (a * 255).round().clamp(0, 255);
+
+        // Basic foreground decontamination to reduce white fringe from
+        // bright backgrounds near uncertain edges.
+        final edgeFactor = math.pow(a, 0.85).toDouble();
+        final r = (p.r * edgeFactor).round().clamp(0, 255);
+        final g = (p.g * edgeFactor).round().clamp(0, 255);
+        final b = (p.b * edgeFactor).round().clamp(0, 255);
+        out.setPixelRgba(x, y, r, g, b, ia);
       }
     }
 
     return Uint8List.fromList(img.encodePng(out));
+  }
+
+  List<double> _boxBlur3x3(List<double> src, int w, int h) {
+    final out = List<double>.filled(src.length, 0);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var sum = 0.0;
+        var count = 0;
+        for (var ky = -1; ky <= 1; ky++) {
+          final ny = y + ky;
+          if (ny < 0 || ny >= h) continue;
+          for (var kx = -1; kx <= 1; kx++) {
+            final nx = x + kx;
+            if (nx < 0 || nx >= w) continue;
+            sum += src[ny * w + nx];
+            count++;
+          }
+        }
+        out[y * w + x] = count == 0 ? src[y * w + x] : (sum / count);
+      }
+    }
+    return out;
+  }
+
+  double _smoothstep(double edge0, double edge1, double x) {
+    final t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    return t * t * (3 - 2 * t);
   }
 
   double _confidenceAt(SegmentationMask m, int x, int y, int imgW, int imgH) {
