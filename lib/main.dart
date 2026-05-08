@@ -6,7 +6,9 @@ import 'package:office_toolspro/constants.dart';
 import 'package:office_toolspro/screens/calculators_screen.dart';
 import 'package:office_toolspro/screens/home_screen.dart';
 import 'package:office_toolspro/screens/scanner_screen.dart';
+import 'package:office_toolspro/screens/settings_screen.dart';
 import 'package:office_toolspro/screens/tool_flows_screen.dart';
+import 'package:office_toolspro/services/app_settings.dart';
 import 'package:office_toolspro/services/file_store.dart';
 
 class ThemeController {
@@ -24,6 +26,7 @@ Future<void> main() async {
     // Optional local env file.
   }
   await FileStore.load();
+  await AppSettings.load();
   runApp(const OfficeToolsApp());
 }
 
@@ -79,6 +82,18 @@ class OfficeToolsApp extends StatelessWidget {
               filled: true,
               fillColor: Colors.white,
               isDense: true,
+              labelStyle: const TextStyle(
+                color: Color(0xFF334155),
+                fontWeight: FontWeight.w600,
+              ),
+              floatingLabelStyle: const TextStyle(
+                color: Color(0xFF1857E6),
+                fontWeight: FontWeight.w700,
+              ),
+              hintStyle: const TextStyle(
+                color: Color(0xFF64748B),
+                fontWeight: FontWeight.w500,
+              ),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               border: OutlineInputBorder(
@@ -147,6 +162,18 @@ class OfficeToolsApp extends StatelessWidget {
               filled: true,
               fillColor: const Color(0xFF1E293B),
               isDense: true,
+              labelStyle: const TextStyle(
+                color: Color(0xFFCBD5E1),
+                fontWeight: FontWeight.w600,
+              ),
+              floatingLabelStyle: const TextStyle(
+                color: Color(0xFF93C5FD),
+                fontWeight: FontWeight.w700,
+              ),
+              hintStyle: const TextStyle(
+                color: Color(0xFF94A3B8),
+                fontWeight: FontWeight.w500,
+              ),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               border: OutlineInputBorder(
@@ -210,6 +237,7 @@ class OfficeToolsApp extends StatelessWidget {
                 ConvertScreen(cloudConvertApiKey: _cloudConvertApiKey),
             '/calculators': (context) => const CalculatorsScreen(),
             '/my-files': (context) => const MyFilesScreen(),
+            '/settings': (context) => const SettingsScreen(),
           },
         );
       },

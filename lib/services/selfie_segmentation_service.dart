@@ -10,7 +10,11 @@ import 'package:path_provider/path_provider.dart';
 class SelfieSegmentationService {
   const SelfieSegmentationService();
 
-  Future<Uint8List> removeBackground(Uint8List imageBytes) async {
+  Future<Uint8List> removeBackground(
+    Uint8List imageBytes, {
+    double edgeSoftness = 0.55,
+    bool highQuality = true,
+  }) async {
     if (kIsWeb) {
       throw UnsupportedError('Selfie segmentation is not available on web.');
     }
@@ -40,7 +44,12 @@ class SelfieSegmentationService {
       if (mask == null) {
         throw Exception('No segmentation mask returned');
       }
-      return _applyMask(decoded, mask);
+      return _applyMask(
+        decoded,
+        mask,
+        edgeSoftness: edgeSoftness,
+        highQuality: highQuality,
+      );
     } finally {
       await segmenter.close();
       try {
@@ -49,7 +58,12 @@ class SelfieSegmentationService {
     }
   }
 
-  Uint8List _applyMask(img.Image source, SegmentationMask mask) {
+  Uint8List _applyMask(
+    img.Image source,
+    SegmentationMask mask, {
+    required double edgeSoftness,
+    required bool highQuality,
+  }) {
     final w = source.width;
     final h = source.height;
     final out = img.Image(width: w, height: h, numChannels: 4);
@@ -64,9 +78,14 @@ class SelfieSegmentationService {
       }
     }
 
-    final blurred = _boxBlur3x3(alpha, w, h);
-    const low = 0.22;
-    const high = 0.88;
+    final blurPasses = highQuality ? 2 : 1;
+    var blurred = alpha;
+    for (int i = 0; i < blurPasses; i++) {
+      blurred = _boxBlur3x3(blurred, w, h);
+    }
+    final softness = edgeSoftness.clamp(0.0, 1.0);
+    final low = (0.14 + softness * 0.2).clamp(0.05, 0.42);
+    final high = (0.72 + softness * 0.22).clamp(0.55, 0.97);
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
         final p = source.getPixel(x, y);
@@ -76,7 +95,7 @@ class SelfieSegmentationService {
 
         // Basic foreground decontamination to reduce white fringe from
         // bright backgrounds near uncertain edges.
-        final edgeFactor = math.pow(a, 0.85).toDouble();
+        final edgeFactor = math.pow(a, highQuality ? 0.8 : 0.9).toDouble();
         final r = (p.r * edgeFactor).round().clamp(0, 255);
         final g = (p.g * edgeFactor).round().clamp(0, 255);
         final b = (p.b * edgeFactor).round().clamp(0, 255);

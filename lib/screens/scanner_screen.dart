@@ -9,9 +9,12 @@ import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:office_toolspro/models/file_item.dart';
+import 'package:office_toolspro/services/app_settings.dart';
 import 'package:office_toolspro/services/file_store.dart';
+import 'package:office_toolspro/services/output_location_service.dart';
+import 'package:office_toolspro/utils/ui_safety.dart';
+import 'package:office_toolspro/widgets/context_hint_card.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:permission_handler/permission_handler.dart';
@@ -189,7 +192,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
     if (!mounted) return;
     final decoded = img.decodeImage(bytes);
     if (decoded == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(
             content:
                 Text('Could not read this image. Please try another one.')),
@@ -197,7 +201,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
       return;
     }
     final normalized = Uint8List.fromList(img.encodeJpg(decoded, quality: 95));
-    final corners = _autoDocumentCornersNormalized(decoded);
+    final corners = AppSettings.state.value.autoDetectScanEdges
+        ? _autoDocumentCornersNormalized(decoded)
+        : _defaultCorners();
     setState(() {
       _captured = normalized;
       _cropped = normalized;
@@ -229,7 +235,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
     setState(() {
       _captured = Uint8List.fromList(img.encodeJpg(rotated, quality: 95));
       _cropped = _captured;
-      _corners = _autoDocumentCornersNormalized(rotated);
+      _corners = AppSettings.state.value.autoDetectScanEdges
+          ? _autoDocumentCornersNormalized(rotated)
+          : _defaultCorners();
     });
   }
 
@@ -303,7 +311,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
     final decoded = img.decodeImage(_captured!);
     if (decoded == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(content: Text('Could not read this photo. Try Retake.')),
       );
       return;
@@ -351,7 +360,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
   void _commitScannedPage({required bool goToCaptureAfter}) {
     if (_cropped == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(
             content: Text('Nothing to add. Capture and crop a page first.')),
       );
@@ -365,7 +375,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
     if (filtered.length < 32) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(
             content: Text('Page image is empty. Go back and crop again.')),
       );
@@ -443,7 +454,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       );
     }
     final bytes = await doc.save();
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await OutputLocationService.resolveOutputDirectory();
     final ts = DateTime.now().millisecondsSinceEpoch;
     final fileName =
         '${name.replaceAll(RegExp(r'[^a-zA-Z0-9_\- ]'), '').trim().replaceAll(' ', '_')}_$ts.pdf';
@@ -464,8 +475,26 @@ class _ScannerScreenState extends State<ScannerScreen> {
       ),
     );
 
+    if (AppSettings.state.value.keepOriginalScanCopy) {
+      final imageName =
+          '${name.replaceAll(RegExp(r'[^a-zA-Z0-9_\- ]'), '').trim().replaceAll(' ', '_')}_${ts}_original.jpg';
+      final imagePath = '${dir.path}/$imageName';
+      await File(imagePath).writeAsBytes(_pages.first.bytes, flush: true);
+      FileStore.addFile(
+        FileItem(
+          id: '${ts}_original',
+          name: imageName,
+          type: FileType.image,
+          date: DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now()),
+          path: imagePath,
+          thumbnailPath: imagePath,
+        ),
+      );
+    }
+
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    UiSafety.showSnackBar(
+      context,
       const SnackBar(content: Text('PDF saved to My Files')),
     );
     Navigator.pushNamed(context, '/my-files');
@@ -598,9 +627,20 @@ class _ScannerScreenState extends State<ScannerScreen> {
         actions: [
           TextButton.icon(
             onPressed: () {
+              if (!AppSettings.state.value.autoDetectScanEdges) {
+                UiSafety.showSnackBar(
+                  context,
+                  const SnackBar(
+                    content: Text(
+                        'Auto edge detect is disabled in Settings. Enable it to use this action.'),
+                  ),
+                );
+                return;
+              }
               final decoded = img.decodeImage(data);
               if (decoded == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                UiSafety.showSnackBar(
+                  context,
                   const SnackBar(
                       content:
                           Text('Could not auto-detect edges on this photo.')),
@@ -618,8 +658,21 @@ class _ScannerScreenState extends State<ScannerScreen> {
       body: Column(
         children: [
           const SizedBox(height: 8),
-          const InlineBannerAd(),
-          const SizedBox(height: 8),
+          if (AppSettings.shouldShowTip('scanner.crop')) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: ContextHintCard(
+                title: 'Editing tip',
+                message:
+                    'Use edge handles for precision crop. Auto edges can be toggled from Settings.',
+                onDismiss: () {
+                  AppSettings.dismissTip('scanner.crop');
+                  setState(() {});
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           Expanded(
             child: LayoutBuilder(
               builder: (context, c) {
@@ -821,8 +874,6 @@ class _ScannerScreenState extends State<ScannerScreen> {
       body: Column(
         children: [
           const SizedBox(height: 8),
-          const InlineBannerAd(),
-          const SizedBox(height: 8),
           Expanded(
             child: Container(
               width: double.infinity,
@@ -911,6 +962,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 
   Widget _filterChip(String label, _PageFilter value) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final selected = _activeFilter == value;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
@@ -918,12 +970,19 @@ class _ScannerScreenState extends State<ScannerScreen> {
         label: Text(
           label,
           style: TextStyle(
-            color: selected ? Colors.white : const Color(0xFF0F172A),
+            color: selected
+                ? Colors.white
+                : (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A)),
             fontWeight: FontWeight.w600,
           ),
         ),
-        selectedColor: const Color(0xFF1857E6),
-        backgroundColor: const Color(0xFFF1F5F9),
+        selectedColor:
+            isDark ? const Color(0xFF1D4ED8) : const Color(0xFF1857E6),
+        backgroundColor:
+            isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        side: BorderSide(
+          color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+        ),
         selected: selected,
         onSelected: (_) {
           setState(() => _activeFilter = value);
@@ -940,6 +999,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            final isDark = Theme.of(context).brightness == Brightness.dark;
             return SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
@@ -970,11 +1030,15 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        const SizedBox(
+                        SizedBox(
                             width: 88,
                             child: Text(
                               'Brightness',
-                              style: TextStyle(color: Color(0xFF0F172A)),
+                              style: TextStyle(
+                                  color: isDark
+                                      ? const Color(0xFFCBD5E1)
+                                      : const Color(0xFF334155),
+                                  fontWeight: FontWeight.w600),
                             )),
                         Expanded(
                           child: Slider(
@@ -999,11 +1063,15 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     ),
                     Row(
                       children: [
-                        const SizedBox(
+                        SizedBox(
                             width: 88,
                             child: Text(
                               'Contrast',
-                              style: TextStyle(color: Color(0xFF0F172A)),
+                              style: TextStyle(
+                                  color: isDark
+                                      ? const Color(0xFFCBD5E1)
+                                      : const Color(0xFF334155),
+                                  fontWeight: FontWeight.w600),
                             )),
                         Expanded(
                           child: Slider(

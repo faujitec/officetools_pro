@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
-import 'package:share_plus/share_plus.dart';
 
 enum _CalcTab { gst, sip, emi, simple }
 
@@ -152,6 +151,29 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       labelPadding: EdgeInsets.zero,
       onSelected: onSelected,
+    );
+  }
+
+  Widget _presetChip({
+    required bool isDark,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return ActionChip(
+      onPressed: onTap,
+      backgroundColor:
+          isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      side: BorderSide(
+        color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 
@@ -391,64 +413,14 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
     controller.text = text;
   }
 
-  String _currentResultSummary() {
-    switch (_tab) {
-      case _CalcTab.gst:
-        return [
-          'GST (${_gstMode == _GstMode.exclusive ? 'Exclusive' : 'Inclusive'})',
-          'Base Amount: ${_money(_gstBase)}',
-          'GST Amount: ${_money(_gstTax)}',
-          'Total: ${_money(_gstTotal)}',
-        ].join('\n');
-      case _CalcTab.sip:
-        return [
-          'SIP/Lumpsum (${_sipMode == _SipMode.sip ? 'SIP' : 'Lumpsum'})',
-          'Invested: ${_money(_sipInvested)}',
-          'Current Value: ${_money(_sipValue)}',
-          'Returns: ${_money(_sipValue - _sipInvested)}',
-        ].join('\n');
-      case _CalcTab.emi:
-        return [
-          'EMI',
-          'Monthly EMI: ${_money(_emiMonthly)}',
-          'Total Interest: ${_money(_emiInterest)}',
-          'Total Payable: ${_money(_emiTotal)}',
-        ].join('\n');
-      case _CalcTab.simple:
-        return 'Simple Calculator\n$_simpleResult';
-    }
-  }
-
-  Future<void> _copyCurrentSummary() async {
-    final text = _currentResultSummary();
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Result copied')),
-    );
-  }
-
-  Future<void> _shareCurrentSummary() async {
-    await SharePlus.instance.share(ShareParams(text: _currentResultSummary()));
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Calculators'),
         actions: [
-          IconButton(
-            tooltip: 'Copy result',
-            onPressed: _copyCurrentSummary,
-            icon: const Icon(Icons.copy_all_rounded),
-          ),
-          IconButton(
-            tooltip: 'Share result',
-            onPressed: _shareCurrentSummary,
-            icon: const Icon(Icons.share_rounded),
-          ),
           TextButton.icon(
             onPressed: _resetCurrentCalculator,
             icon: const Icon(Icons.refresh_rounded),
@@ -464,7 +436,7 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
           const SizedBox(height: 8),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
               children: [
                 Wrap(
                   spacing: 8,
@@ -552,9 +524,10 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
                         runSpacing: 8,
                         children: [5, 12, 18, 28]
                             .map(
-                              (p) => ActionChip(
-                                label: Text('$p%'),
-                                onPressed: () => _setNumericValue(
+                              (p) => _presetChip(
+                                isDark: isDark,
+                                label: '$p%',
+                                onTap: () => _setNumericValue(
                                     _gstRateController, p.toDouble()),
                               ),
                             )
@@ -651,9 +624,10 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
                         runSpacing: 8,
                         children: [8, 10, 12, 14, 16]
                             .map(
-                              (p) => ActionChip(
-                                label: Text('$p%'),
-                                onPressed: () => _setNumericValue(
+                              (p) => _presetChip(
+                                isDark: isDark,
+                                label: '$p%',
+                                onTap: () => _setNumericValue(
                                     _sipRateController, p.toDouble()),
                               ),
                             )
@@ -750,9 +724,10 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
                         runSpacing: 8,
                         children: [7, 8, 9, 10, 12]
                             .map(
-                              (p) => ActionChip(
-                                label: Text('$p%'),
-                                onPressed: () => _setNumericValue(
+                              (p) => _presetChip(
+                                isDark: isDark,
+                                label: '$p%',
+                                onTap: () => _setNumericValue(
                                     _emiRateController, p.toDouble()),
                               ),
                             )
@@ -927,6 +902,7 @@ class _NumberField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: TextField(
@@ -937,6 +913,10 @@ class _NumberField extends StatelessWidget {
         ],
         decoration: InputDecoration(
           labelText: label,
+          labelStyle: TextStyle(
+            color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+            fontWeight: FontWeight.w700,
+          ),
           border: const OutlineInputBorder(),
           suffixIcon: IconButton(
             tooltip: 'Open number pad',

@@ -10,12 +10,16 @@ import 'package:image_picker/image_picker.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:office_toolspro/models/file_item.dart';
 import 'package:office_toolspro/services/analytics_service.dart';
+import 'package:office_toolspro/services/app_settings.dart';
 import 'package:office_toolspro/services/convert_service.dart';
 import 'package:office_toolspro/services/compress_service.dart';
 import 'package:office_toolspro/services/file_store.dart';
 import 'package:office_toolspro/services/ocr_service.dart';
+import 'package:office_toolspro/services/output_location_service.dart';
 import 'package:office_toolspro/services/pdf_tools_service.dart';
 import 'package:office_toolspro/services/selfie_segmentation_service.dart';
+import 'package:office_toolspro/utils/ui_safety.dart';
+import 'package:office_toolspro/widgets/context_hint_card.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
 import 'package:office_toolspro/widgets/upload_drop_card.dart';
 import 'package:path_provider/path_provider.dart';
@@ -47,6 +51,7 @@ const List<ToolOption> imageTools = <ToolOption>[
     id: 'remove-bg',
     name: 'Remove Background',
     icon: Icons.layers_outlined,
+    isBeta: true,
   ),
   ToolOption(
       id: 'compress-img',
@@ -78,6 +83,7 @@ const List<ToolOption> pdfTools = <ToolOption>[
     name: 'OCR (Extract Text)',
     icon: Icons.document_scanner_outlined,
     requiresInternet: true,
+    isBeta: true,
   ),
 ];
 
@@ -108,7 +114,6 @@ const List<ToolOption> convertTools = <ToolOption>[
     name: 'Excel to PDF',
     icon: Icons.table_chart_outlined,
     requiresInternet: true,
-    isBeta: true,
   ),
   ToolOption(
     id: 'compress-word',
@@ -172,6 +177,7 @@ class _ToolListScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -191,11 +197,25 @@ class _ToolListScaffold extends StatelessWidget {
       body: Column(
         children: [
           const SizedBox(height: 8),
+          if (AppSettings.shouldShowTip('tools.$title')) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: ContextHintCard(
+                title: '$title tip',
+                message:
+                    'Pick a file, preview the result, then open from My Files. Long jobs may take a few seconds.',
+                onDismiss: () {
+                  AppSettings.dismissTip('tools.$title');
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           const InlineBannerAd(),
           const SizedBox(height: 8),
           Expanded(
             child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + bottomInset),
               itemCount: tools.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
@@ -265,6 +285,7 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
   bool _success = false;
   int _progress = 0;
   String _resultMessage = '';
+  String? _conversionModeLabel;
   String? _lastOutputPath;
   int? _beforeBytes;
   int? _afterBytes;
@@ -321,7 +342,7 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
 
   Future<String> _saveConverted(
       Uint8List bytes, String ext, String toolId) async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await OutputLocationService.resolveOutputDirectory();
     final ts = DateTime.now().millisecondsSinceEpoch;
     final path = '${dir.path}/Converted_${toolId}_$ts.$ext';
     final out = File(path);
@@ -330,12 +351,15 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
   }
 
   Future<void> _convert() async {
+    final canUseCloud = AppSettings.state.value.cloudFeaturesEnabled &&
+        widget.cloudConvertApiKey.isNotEmpty;
     _timer?.cancel();
     setState(() {
       _processing = true;
       _success = false;
       _progress = 0;
       _resultMessage = '';
+      _conversionModeLabel = null;
     });
     _timer = Timer.periodic(const Duration(milliseconds: 80), (timer) {
       if (_progress >= 90) {
@@ -354,29 +378,49 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
           throw Exception('Select an image first');
         }
         result = service.imageToPdf(_selectedFile!.bytes!);
+        _conversionModeLabel = 'Local';
       } else if (widget.tool.id == 'pdf-word') {
         if (_selectedFile?.bytes == null) {
           throw Exception('Select a PDF first');
         }
-        result = await service.cloudConvert(
-          inputBytes: _selectedFile!.bytes!,
-          fileName: _selectedFile!.name,
-          inputFormat: 'pdf',
-          outputFormat: 'docx',
-        );
+        if (canUseCloud) {
+          result = await service.cloudConvert(
+            inputBytes: _selectedFile!.bytes!,
+            fileName: _selectedFile!.name,
+            inputFormat: 'pdf',
+            outputFormat: 'docx',
+          );
+          _conversionModeLabel = 'Cloud fidelity';
+        } else {
+          result = service.pdfToWordBasic(_selectedFile!.bytes!);
+          successMessage =
+              'Saved basic DOCX (text-focused). Complex layout may differ.';
+          _conversionModeLabel = 'Basic free';
+        }
       } else if (widget.tool.id == 'word-pdf') {
         if (_selectedFile?.bytes == null) {
           throw Exception('Select a DOCX first');
         }
-        result = await service.cloudConvert(
-          inputBytes: _selectedFile!.bytes!,
-          fileName: _selectedFile!.name,
-          inputFormat: 'docx',
-          outputFormat: 'pdf',
-        );
+        if (canUseCloud) {
+          result = await service.cloudConvert(
+            inputBytes: _selectedFile!.bytes!,
+            fileName: _selectedFile!.name,
+            inputFormat: 'docx',
+            outputFormat: 'pdf',
+          );
+          _conversionModeLabel = 'Cloud fidelity';
+        } else {
+          result = service.wordToPdfBasic(_selectedFile!.bytes!);
+          successMessage =
+              'Saved basic PDF (text-focused). Complex layout may differ.';
+          _conversionModeLabel = 'Basic free';
+        }
       } else if (widget.tool.id == 'excel-pdf') {
         if (_selectedFile?.bytes == null) {
           throw Exception('Select an XLS/XLSX first');
+        }
+        if (!canUseCloud) {
+          throw Exception('EXCEL_CLOUD_REQUIRED');
         }
         final ext = (_selectedFile!.extension ?? 'xlsx').toLowerCase();
         result = await service.cloudConvert(
@@ -385,6 +429,7 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
           inputFormat: ext == 'xls' ? 'xls' : 'xlsx',
           outputFormat: 'pdf',
         );
+        _conversionModeLabel = 'Cloud fidelity';
       } else if (widget.tool.id == 'compress-word') {
         if (_selectedFile?.bytes == null) {
           throw Exception('Select a DOC/DOCX first');
@@ -400,17 +445,20 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
         successMessage = c.reduced
             ? 'Word file compressed and saved.'
             : 'No size reduction possible for this document.';
+        _conversionModeLabel = 'Local';
       } else if (widget.tool.id == 'img-convert') {
         if (_selectedFile?.bytes == null) {
           throw Exception('Select an image first');
         }
         result = service.convertImageFormat(
             _selectedFile!.bytes!, _imageOutputFormat);
+        _conversionModeLabel = 'Local';
       } else if (widget.tool.id == 'text-pdf') {
         if (_textController.text.trim().isEmpty) {
           throw Exception('Enter text first');
         }
         result = service.textToPdf(_textController.text);
+        _conversionModeLabel = 'Local';
       } else {
         throw Exception('Unsupported convert tool');
       }
@@ -453,17 +501,22 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
         _processing = false;
         _beforeBytes = null;
         _afterBytes = null;
+        _conversionModeLabel = null;
       });
       final errorText = e.toString();
       String message = 'Could not convert. Check file type/size and retry.';
       if (errorText.contains('CLOUDCONVERT_API_KEY')) {
         message = 'This conversion requires CloudConvert API key.';
+      } else if (errorText.contains('EXCEL_CLOUD_REQUIRED')) {
+        message =
+            'Excel to PDF needs CloudConvert key. Free basic mode is available for PDF↔Word only.';
       } else if (errorText.contains('No internet connection')) {
         message = 'No internet connection. Please reconnect and retry.';
       } else if (errorText.contains('timed out')) {
         message = 'Conversion request timed out. Please retry.';
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         SnackBar(content: Text(message)),
       );
     }
@@ -498,6 +551,23 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
                       16 + MediaQuery.of(context).padding.bottom,
                     ),
                     children: [
+                      if ((widget.tool.id == 'pdf-word' ||
+                              widget.tool.id == 'word-pdf' ||
+                              widget.tool.id == 'excel-pdf') &&
+                          AppSettings.shouldShowTip('convert.cloud')) ...[
+                        ContextHintCard(
+                          title: 'Conversion mode',
+                          message: (widget.cloudConvertApiKey.isEmpty ||
+                                  !AppSettings.state.value.cloudFeaturesEnabled)
+                              ? 'Free basic conversion is active (text-focused). Enable CloudConvert for higher-fidelity layout conversion.'
+                              : 'High-fidelity cloud conversion is enabled. Free basic conversion remains available when cloud is disabled.',
+                          onDismiss: () {
+                            AppSettings.dismissTip('convert.cloud');
+                            setState(() {});
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       if (widget.tool.id != 'text-pdf') ...[
                         Builder(
                           builder: (context) {
@@ -591,6 +661,36 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
                               title: 'Conversion Successful',
                               subtitle: _resultMessage,
                             ),
+                            if (_conversionModeLabel != null) ...[
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        _conversionModeLabel == 'Cloud fidelity'
+                                            ? const Color(0xFFE0F2FE)
+                                            : const Color(0xFFECFDF5),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: _conversionModeLabel ==
+                                              'Cloud fidelity'
+                                          ? const Color(0xFF7DD3FC)
+                                          : const Color(0xFF86EFAC),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'Mode: $_conversionModeLabel',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                             const SizedBox(height: 10),
                             _PostJobActions(
                               filePath: _lastOutputPath,
@@ -670,6 +770,8 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
   String _cropRatio = 'free';
   String _convertFormat = 'jpg';
   String _sourceFormat = 'jpg';
+  double _removeBgEdgeSoftness = 0.55;
+  bool _removeBgHighQuality = true;
   int? _statInputBytes;
   int? _statOutputBytes;
   String? _statBeforeDims;
@@ -683,6 +785,12 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
   int? _cropDragHandle;
   Timer? _timer;
 
+  @override
+  void initState() {
+    super.initState();
+    _quality = AppSettings.state.value.defaultImageQuality;
+  }
+
   Future<void> _pickImage() async {
     if (_isPickingImage) return;
     _isPickingImage = true;
@@ -693,7 +801,8 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
       final decoded = img.decodeImage(bytes);
       if (decoded == null) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+        UiSafety.showSnackBar(
+          context,
           const SnackBar(content: Text('Could not load this image.')),
         );
         return;
@@ -706,6 +815,8 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
         _removedBgCutoutBytes = null;
         _removeBgSolidColor = null;
         _sourceFormat = sourceFormat;
+        _removeBgEdgeSoftness = 0.55;
+        _removeBgHighQuality = true;
         _resizeWidth = decoded.width;
         _resizeHeight = decoded.height;
         _resizeWController.text = decoded.width.toString();
@@ -734,7 +845,8 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
       });
     } on PlatformException {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(
             content: Text('Image picker is busy. Please try again.')),
       );
@@ -1021,7 +1133,7 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
   }
 
   Future<String> _saveOutput(Uint8List data) async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await OutputLocationService.resolveOutputDirectory();
     final ts = DateTime.now().millisecondsSinceEpoch;
     final ext = _outputExt();
     final fileName = 'IMG_${widget.tool.id}_$ts.$ext';
@@ -1052,8 +1164,12 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
         if (_sourceBytes == null) {
           throw Exception('No source image');
         }
-        _removedBgCutoutBytes = await const SelfieSegmentationService()
-            .removeBackground(_sourceBytes!);
+        _removedBgCutoutBytes =
+            await const SelfieSegmentationService().removeBackground(
+          _sourceBytes!,
+          edgeSoftness: _removeBgEdgeSoftness,
+          highQuality: _removeBgHighQuality,
+        );
         bytes = _removeBgOutputBytes();
       } else {
         final processed = _buildProcessedImage();
@@ -1104,7 +1220,8 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
         _lastErrorCode = 'UNSUPPORTED';
         _lastErrorMessage = e.message;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         SnackBar(
             content: Text(
                 e.message ?? 'This action is not supported on this platform.')),
@@ -1123,7 +1240,8 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
             ? 'Could not remove background. Try a clear photo with a person in frame.'
             : 'Image processing failed. Please try a different image.';
       });
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         SnackBar(
           content: Text(
             widget.tool.id == 'remove-bg'
@@ -1151,12 +1269,14 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
       final output = File('${dir.path}/$fileName');
       await output.writeAsBytes(bytes, flush: true);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(content: Text('PNG copy saved')),
       );
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(content: Text('Could not save PNG copy.')),
       );
     }
@@ -1225,10 +1345,9 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
                             child: SizedBox(
                               width: double.infinity,
                               child: AspectRatio(
-                                // Adapt preview canvas to source image shape so
-                                // portrait photos don't look excessively squeezed.
-                                aspectRatio: (widget.tool.id == 'crop' &&
-                                        _decodedSource != null)
+                                // Adapt preview canvas to source image shape in all
+                                // image tools so portrait photos are not squeezed.
+                                aspectRatio: (_decodedSource != null)
                                     ? (_decodedSource!.width /
                                             _decodedSource!.height)
                                         .clamp(0.62, 1.6)
@@ -1516,6 +1635,73 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
                                           );
                                         }),
                                       ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (widget.tool.id == 'remove-bg') ...[
+                              Container(
+                                width: double.infinity,
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  border: Border.all(
+                                      color: const Color(0xFFE2E8F0)),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Edge refine',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF0F172A),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        const Text(
+                                          'Higher quality',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                        const Spacer(),
+                                        Switch(
+                                          value: _removeBgHighQuality,
+                                          onChanged: (v) {
+                                            setState(() {
+                                              _removeBgHighQuality = v;
+                                              _success = false;
+                                              _statusText = '';
+                                            });
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    const Text(
+                                      'Edge softness',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w600),
+                                    ),
+                                    Slider(
+                                      value: _removeBgEdgeSoftness,
+                                      min: 0.0,
+                                      max: 1.0,
+                                      divisions: 20,
+                                      label: _removeBgEdgeSoftness
+                                          .toStringAsFixed(2),
+                                      onChanged: (v) {
+                                        setState(() {
+                                          _removeBgEdgeSoftness = v;
+                                          _success = false;
+                                          _statusText = '';
+                                        });
+                                      },
                                     ),
                                   ],
                                 ),
@@ -1824,8 +2010,8 @@ class _ImageToolControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (toolId == 'resize') {
-      final isDark = Theme.of(context).brightness == Brightness.dark;
       return Column(
         children: [
           Container(
@@ -1900,6 +2086,7 @@ class _ImageToolControls extends StatelessWidget {
             runSpacing: 8,
             children: [
               _AnimatedChoiceChip(
+                isDark: isDark,
                 label: '1:1',
                 selected: cropRatio == '1:1',
                 onTap: () {
@@ -1908,6 +2095,7 @@ class _ImageToolControls extends StatelessWidget {
                 },
               ),
               _AnimatedChoiceChip(
+                isDark: isDark,
                 label: '4:3',
                 selected: cropRatio == '4:3',
                 onTap: () {
@@ -1916,6 +2104,7 @@ class _ImageToolControls extends StatelessWidget {
                 },
               ),
               _AnimatedChoiceChip(
+                isDark: isDark,
                 label: '16:9',
                 selected: cropRatio == '16:9',
                 onTap: () {
@@ -1924,6 +2113,7 @@ class _ImageToolControls extends StatelessWidget {
                 },
               ),
               _AnimatedChoiceChip(
+                isDark: isDark,
                 label: '9:16',
                 selected: cropRatio == '9:16',
                 onTap: () {
@@ -1932,6 +2122,7 @@ class _ImageToolControls extends StatelessWidget {
                 },
               ),
               _AnimatedChoiceChip(
+                isDark: isDark,
                 label: 'Free',
                 selected: cropRatio == 'free',
                 onTap: () {
@@ -1953,6 +2144,7 @@ class _ImageToolControls extends StatelessWidget {
         children: formats
             .map(
               (fmt) => _AnimatedChoiceChip(
+                isDark: isDark,
                 label: fmt.toUpperCase(),
                 selected: convertFormat == fmt,
                 onTap: () => onConvertFormatChanged(fmt),
@@ -2019,11 +2211,13 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
   bool _success = false;
   int _progress = 0;
   String _ocrText = '';
+  final TextEditingController _ocrSearchController = TextEditingController();
   String _statusText = '';
   String? _errorCode;
   String? _errorMessage;
   String? _lastOutputPath;
   int _sourcePageCount = 0;
+  bool _largePdfMode = false;
   int? _beforeBytes;
   int? _afterBytes;
   Timer? _timer;
@@ -2085,7 +2279,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
     }
     if (oversized) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(
             content: Text(
                 'One or more files are over 50MB. Please use smaller PDFs.')),
@@ -2117,13 +2312,25 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
       _pdfPathForOpen = diskPath;
       _success = false;
       _ocrText = '';
+      _ocrSearchController.clear();
       _sourcePageCount = pages;
+      _largePdfMode = pages >= 100;
       _statusText = '';
       _beforeBytes = null;
       _afterBytes = null;
       _errorCode = null;
       _errorMessage = null;
     });
+    if (_largePdfMode && mounted) {
+      UiSafety.showSnackBar(
+        context,
+        const SnackBar(
+          content: Text(
+            'Large PDF detected. Page tools now use optimized list mode.',
+          ),
+        ),
+      );
+    }
   }
 
   String _formatBytes(int bytes) {
@@ -2135,6 +2342,54 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
       unit++;
     }
     return '${size.toStringAsFixed(unit == 0 ? 0 : 1)} ${units[unit]}';
+  }
+
+  int _ocrMatchCount() {
+    final q = _ocrSearchController.text.trim().toLowerCase();
+    if (q.isEmpty || _ocrText.isEmpty) return 0;
+    final text = _ocrText.toLowerCase();
+    var idx = 0;
+    var count = 0;
+    while (true) {
+      idx = text.indexOf(q, idx);
+      if (idx == -1) break;
+      count++;
+      idx += q.length;
+    }
+    return count;
+  }
+
+  Future<void> _copyOcrText() async {
+    if (_ocrText.trim().isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: _ocrText));
+    if (!mounted) return;
+    UiSafety.showSnackBar(
+      context,
+      const SnackBar(content: Text('Extracted text copied')),
+    );
+  }
+
+  Future<void> _saveOcrAsTxt() async {
+    if (_ocrText.trim().isEmpty) return;
+    final dir = await OutputLocationService.resolveOutputDirectory();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final file = File('${dir.path}/ocr_text_$ts.txt');
+    await file.writeAsString(_ocrText, flush: true);
+    FileStore.addFile(
+      FileItem(
+        id: ts.toString(),
+        name: file.path.split('/').last,
+        type: FileType.txt,
+        date: 'Just now',
+        path: file.path,
+        content: _ocrText,
+      ),
+    );
+    if (!mounted) return;
+    UiSafety.showSnackBar(
+      context,
+      const SnackBar(content: Text('OCR text saved as TXT')),
+    );
   }
 
   Future<void> _showVisualPagePicker() async {
@@ -2159,8 +2414,9 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
               ),
               content: SizedBox(
                 width: double.maxFinite,
-                height: 360,
-                child: ListView(
+                height: 420,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       toolId == 'delete'
@@ -2171,24 +2427,111 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
                       style: const TextStyle(
                           fontSize: 13, color: Color(0xFF64748B)),
                     ),
+                    if (_largePdfMode) ...[
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Large PDF mode: list is virtualized for smoother scrolling.',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF475569),
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ],
                     const SizedBox(height: 12),
-                    ...List.generate(_sourcePageCount, (i) {
-                      final n = i + 1;
-                      return CheckboxListTile(
-                        dense: true,
-                        value: selected.contains(n),
-                        onChanged: (v) {
-                          setDialogState(() {
-                            if (v == true) {
-                              selected.add(n);
-                            } else {
-                              selected.remove(n);
-                            }
-                          });
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ActionChip(
+                          label: const Text('All'),
+                          onPressed: () {
+                            setDialogState(() {
+                              selected = {
+                                for (int i = 1; i <= _sourcePageCount; i++) i
+                              };
+                            });
+                          },
+                        ),
+                        ActionChip(
+                          label: const Text('Clear'),
+                          onPressed: () {
+                            setDialogState(() {
+                              selected = <int>{};
+                            });
+                          },
+                        ),
+                        ActionChip(
+                          label: const Text('First 10'),
+                          onPressed: () {
+                            setDialogState(() {
+                              selected = {
+                                for (int i = 1;
+                                    i <= math.min(10, _sourcePageCount);
+                                    i++)
+                                  i
+                              };
+                            });
+                          },
+                        ),
+                        ActionChip(
+                          label: const Text('Last 10'),
+                          onPressed: () {
+                            final start = math.max(1, _sourcePageCount - 9);
+                            setDialogState(() {
+                              selected = {
+                                for (int i = start; i <= _sourcePageCount; i++)
+                                  i
+                              };
+                            });
+                          },
+                        ),
+                        ActionChip(
+                          label: const Text('Odd'),
+                          onPressed: () {
+                            setDialogState(() {
+                              selected = {
+                                for (int i = 1; i <= _sourcePageCount; i++)
+                                  if (i.isOdd) i
+                              };
+                            });
+                          },
+                        ),
+                        ActionChip(
+                          label: const Text('Even'),
+                          onPressed: () {
+                            setDialogState(() {
+                              selected = {
+                                for (int i = 1; i <= _sourcePageCount; i++)
+                                  if (i.isEven) i
+                              };
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: _sourcePageCount,
+                        itemBuilder: (context, i) {
+                          final n = i + 1;
+                          return CheckboxListTile(
+                            dense: true,
+                            value: selected.contains(n),
+                            onChanged: (v) {
+                              setDialogState(() {
+                                if (v == true) {
+                                  selected.add(n);
+                                } else {
+                                  selected.remove(n);
+                                }
+                              });
+                            },
+                            title: Text('Page $n'),
+                          );
                         },
-                        title: Text('Page $n'),
-                      );
-                    }),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -2208,7 +2551,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
     );
     if (picked == null || !mounted) return;
     if (picked.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(content: Text('Select at least one page.')),
       );
       return;
@@ -2271,7 +2615,7 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
   }
 
   Future<String> _savePdfOutput(Uint8List bytes, String prefix) async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await OutputLocationService.resolveOutputDirectory();
     final ts = DateTime.now().millisecondsSinceEpoch;
     final fileName = '${prefix}_$ts.pdf';
     final file = File('${dir.path}/$fileName');
@@ -2320,7 +2664,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
           _errorMessage =
               'OCR found no text. For scanned PDFs, try converting pages to images first.';
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        UiSafety.showSnackBar(
+          context,
           const SnackBar(
             content:
                 Text('OCR found no text. Try a clearer image/PDF and retry.'),
@@ -2441,7 +2786,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
         _errorMessage =
             'Could not process this PDF. Verify file/pages and try again.';
       });
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(
             content: Text(
                 'Could not process this PDF. Verify file/pages and try again.')),
@@ -2491,7 +2837,8 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
             ? 'Original PDF + OCR text PDF saved'
             : 'OCR text PDF saved to My Files';
       });
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         SnackBar(
           content: Text(
             (first != null && firstExt == 'pdf')
@@ -2507,6 +2854,7 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
 
   @override
   void dispose() {
+    _ocrSearchController.dispose();
     _passwordController.dispose();
     _rangeController.dispose();
     _orderController.dispose();
@@ -2643,6 +2991,17 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
                               fontWeight: FontWeight.w600,
                               color: Color(0xFF64748B)),
                         ),
+                        if (_largePdfMode) ...[
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Large PDF mode enabled for smoother page handling.',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF475569),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 10),
                       ],
                       if (widget.tool.id == 'split' ||
@@ -2767,13 +3126,64 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
                       if (_ocrText.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         const Text(
-                          'Extracted text',
+                          'OCR Reader',
                           style: TextStyle(
                               fontWeight: FontWeight.w800, fontSize: 15),
                         ),
                         const SizedBox(height: 8),
-                        SelectableText(_ocrText),
+                        TextField(
+                          controller: _ocrSearchController,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.search_rounded),
+                            labelText: 'Find in extracted text',
+                          ),
+                          onChanged: (_) => setState(() {}),
+                        ),
+                        const SizedBox(height: 6),
+                        if (_ocrSearchController.text.trim().isNotEmpty)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Matches: ${_ocrMatchCount()}',
+                              style: const TextStyle(
+                                color: Color(0xFF475569),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          constraints: const BoxConstraints(maxHeight: 220),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: SingleChildScrollView(
+                            child: SelectableText(_ocrText),
+                          ),
+                        ),
                         const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: _copyOcrText,
+                              icon: const Icon(Icons.copy_rounded),
+                              label: const Text('Copy text'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: _saveOcrAsTxt,
+                              icon: const Icon(Icons.text_snippet_outlined),
+                              label: const Text('Save TXT'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
                         Align(
                           alignment: Alignment.centerLeft,
                           child: FilledButton.icon(
@@ -2836,28 +3246,13 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
 class MyFilesScreen extends StatelessWidget {
   const MyFilesScreen({super.key});
 
-  static Future<void> _showInFolder(String filePath) async {
-    final dir = File(filePath).parent.path;
-    if (Platform.isMacOS) {
-      await Process.run('open', [dir]);
-      return;
-    }
-    if (Platform.isWindows) {
-      await Process.run('explorer', [dir]);
-      return;
-    }
-    if (Platform.isLinux) {
-      await Process.run('xdg-open', [dir]);
-      return;
-    }
-  }
-
   static Future<void> _promptOpenFile(
       BuildContext context, FileItem file) async {
     final path = file.path;
     if (path == null || path.isEmpty) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      UiSafety.showSnackBar(
+        context,
         const SnackBar(content: Text('This item has no file path to open.')),
       );
       return;
@@ -2946,8 +3341,13 @@ class MyFilesScreen extends StatelessWidget {
                                         overflow: TextOverflow.ellipsis),
                                     Text(
                                       file.type.name.toUpperCase(),
-                                      style: const TextStyle(
-                                          fontSize: 12, color: Colors.grey),
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        color: isDark
+                                            ? const Color(0xFF94A3B8)
+                                            : const Color(0xFF64748B),
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -2962,10 +3362,6 @@ class MyFilesScreen extends StatelessWidget {
                                     builder: (ctx) {
                                       final hasPath = file.path != null &&
                                           file.path!.isNotEmpty;
-                                      final canShowFolder = hasPath &&
-                                          (Platform.isMacOS ||
-                                              Platform.isWindows ||
-                                              Platform.isLinux);
                                       return SafeArea(
                                         child: Column(
                                           mainAxisSize: MainAxisSize.min,
@@ -3007,8 +3403,9 @@ class MyFilesScreen extends StatelessWidget {
                                                         text: file.content!),
                                                   );
                                                 } else {
-                                                  ScaffoldMessenger.of(context)
-                                                      .showSnackBar(
+                                                  if (!context.mounted) return;
+                                                  UiSafety.showSnackBar(
+                                                    context,
                                                     const SnackBar(
                                                         content: Text(
                                                             'Nothing to share yet.')),
@@ -3094,44 +3491,6 @@ class MyFilesScreen extends StatelessWidget {
                                                 }
                                               },
                                             ),
-                                            ListTile(
-                                              leading: const Icon(
-                                                  Icons.copy_rounded),
-                                              title:
-                                                  const Text('Copy file path'),
-                                              enabled: hasPath,
-                                              onTap: !hasPath
-                                                  ? null
-                                                  : () async {
-                                                      Navigator.of(ctx).pop();
-                                                      await Clipboard.setData(
-                                                          ClipboardData(
-                                                              text:
-                                                                  file.path!));
-                                                      if (!context.mounted) {
-                                                        return;
-                                                      }
-                                                      ScaffoldMessenger.of(
-                                                              context)
-                                                          .showSnackBar(
-                                                        const SnackBar(
-                                                            content: Text(
-                                                                'Path copied')),
-                                                      );
-                                                    },
-                                            ),
-                                            if (canShowFolder)
-                                              ListTile(
-                                                leading: const Icon(
-                                                    Icons.folder_open_outlined),
-                                                title: const Text(
-                                                    'Open containing folder'),
-                                                onTap: () async {
-                                                  Navigator.of(ctx).pop();
-                                                  await _showInFolder(
-                                                      file.path!);
-                                                },
-                                              ),
                                             const Divider(height: 1),
                                             ListTile(
                                               leading: const Icon(
@@ -3143,7 +3502,23 @@ class MyFilesScreen extends StatelessWidget {
                                                       color: Colors.red)),
                                               onTap: () {
                                                 Navigator.of(ctx).pop();
+                                                final removed = file;
                                                 FileStore.removeById(file.id);
+                                                if (!context.mounted) return;
+                                                UiSafety.showSnackBar(
+                                                  context,
+                                                  SnackBar(
+                                                    content: Text(
+                                                        '"${removed.name}" removed'),
+                                                    action: SnackBarAction(
+                                                      label: 'Undo',
+                                                      onPressed: () =>
+                                                          FileStore.restore(
+                                                              removed,
+                                                              index: 0),
+                                                    ),
+                                                  ),
+                                                );
                                               },
                                             ),
                                             const SizedBox(height: 8),
@@ -3179,6 +3554,11 @@ class _ProcessingOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final stage = progress < 25
+        ? 'Reading input'
+        : progress < 75
+            ? 'Processing'
+            : 'Saving output';
     return Container(
       color: const Color(0xFF0F172A).withValues(alpha: 0.42),
       child: Center(
@@ -3209,6 +3589,15 @@ class _ProcessingOverlay extends StatelessWidget {
                 style: const TextStyle(
                   color: Color(0xFF64748B),
                   fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                stage,
+                style: const TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 8),
@@ -3270,7 +3659,11 @@ class _SuccessPanel extends StatelessWidget {
           Text(
             subtitle,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Color(0xFF64748B)),
+            style: const TextStyle(
+              color: Color(0xFF64748B),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -3390,23 +3783,6 @@ class _ToolListTile extends StatefulWidget {
 class _ToolListTileState extends State<_ToolListTile> {
   bool _pressed = false;
 
-  String _qualityLabel(String id) {
-    switch (id) {
-      case 'compress-pdf':
-      case 'compress-img':
-      case 'ocr':
-      case 'remove-bg':
-        return 'On-device';
-      case 'img-convert':
-      case 'convert-img':
-      case 'resize':
-      case 'crop':
-        return 'Fast';
-      default:
-        return 'Balanced';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -3466,30 +3842,11 @@ class _ToolListTileState extends State<_ToolListTile> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          _CapabilityChip(
-                            label: widget.tool.requiresInternet
-                                ? 'Online'
-                                : 'Offline',
-                            color: widget.tool.requiresInternet
-                                ? const Color(0xFFEA580C)
-                                : const Color(0xFF16A34A),
-                          ),
-                          if (widget.tool.isBeta) ...[
-                            const SizedBox(width: 6),
-                            const _CapabilityChip(
-                              label: 'Beta',
-                              color: Color(0xFF7C3AED),
-                            ),
-                          ],
-                          const SizedBox(width: 6),
-                          _CapabilityChip(
-                            label: _qualityLabel(widget.tool.id),
-                            color: const Color(0xFF1857E6),
-                          ),
-                        ],
-                      ),
+                      if (widget.tool.isBeta)
+                        const _CapabilityChip(
+                          label: 'Beta',
+                          color: Color(0xFF7C3AED),
+                        ),
                     ],
                   ),
                 ),
@@ -3531,11 +3888,13 @@ class _CapabilityChip extends StatelessWidget {
 }
 
 class _AnimatedChoiceChip extends StatelessWidget {
+  final bool isDark;
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
   const _AnimatedChoiceChip({
+    required this.isDark,
     required this.label,
     required this.selected,
     required this.onTap,
@@ -3546,10 +3905,16 @@ class _AnimatedChoiceChip extends StatelessWidget {
     return ChoiceChip(
       label: Text(label),
       selected: selected,
-      selectedColor: const Color(0xFFE2EBFF),
-      side: const BorderSide(color: Color(0xFFCBD5E1)),
+      selectedColor: isDark ? const Color(0xFF1D4ED8) : const Color(0xFFE2EBFF),
+      backgroundColor:
+          isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      side: BorderSide(
+        color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+      ),
       labelStyle: TextStyle(
-        color: selected ? const Color(0xFF1857E6) : const Color(0xFF334155),
+        color: selected
+            ? (isDark ? Colors.white : const Color(0xFF1857E6))
+            : (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155)),
         fontWeight: FontWeight.w700,
       ),
       onSelected: (_) => onTap(),

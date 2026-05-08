@@ -4,8 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
-const bool _adsEnabled =
-    bool.fromEnvironment('ENABLE_ADS', defaultValue: true) && !kDebugMode;
+// By default, keep ads off in debug and on elsewhere.
+// Use --dart-define=ENABLE_ADS=true to test ads on emulators/devices in debug.
+const bool _adsEnabled = bool.fromEnvironment(
+  'ENABLE_ADS',
+  defaultValue: !kDebugMode,
+);
 
 class GlobalBannerAd extends StatefulWidget {
   final Widget child;
@@ -83,7 +87,9 @@ class _GlobalBannerAdState extends State<GlobalBannerAd> {
     if (!_adsEnabled) {
       return widget.child;
     }
-    final adHeight = _isLoaded && _bannerAd != null ? _bannerAd!.size.height.toDouble() : 0.0;
+    final adHeight = _isLoaded && _bannerAd != null
+        ? _bannerAd!.size.height.toDouble()
+        : 0.0;
     final topInset = MediaQuery.of(context).padding.top;
     final contentTopPadding = adHeight > 0 ? adHeight + topInset : 0.0;
 

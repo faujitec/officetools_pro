@@ -8,7 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class FileStore {
   FileStore._();
   static const _prefsKey = 'file_store_items_v1';
-  static final ValueNotifier<List<FileItem>> files = ValueNotifier<List<FileItem>>([]);
+  static final ValueNotifier<List<FileItem>> files =
+      ValueNotifier<List<FileItem>>([]);
 
   static Future<void> load() async {
     try {
@@ -66,6 +67,14 @@ class FileStore {
 
   static void removeById(String id) {
     files.value = files.value.where((f) => f.id != id).toList(growable: false);
+    _save();
+  }
+
+  static void restore(FileItem file, {int index = 0}) {
+    final list = List<FileItem>.from(files.value);
+    final safeIndex = index.clamp(0, list.length).toInt();
+    list.insert(safeIndex, file);
+    files.value = list;
     _save();
   }
 

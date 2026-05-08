@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:office_toolspro/constants.dart';
 import 'package:office_toolspro/main.dart';
 import 'package:office_toolspro/models/file_item.dart';
+import 'package:office_toolspro/services/app_settings.dart';
 import 'package:office_toolspro/services/file_store.dart';
+import 'package:office_toolspro/utils/ui_safety.dart';
+import 'package:office_toolspro/widgets/context_hint_card.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -48,6 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       drawer: const _AppDrawer(),
@@ -83,7 +86,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: SingleChildScrollView(
         controller: _scrollController,
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottomInset),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -99,6 +102,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     )
                   : const SizedBox.shrink(key: ValueKey('top-banner-hidden')),
             ),
+            if (AppSettings.shouldShowTip('home.quickstart')) ...[
+              ContextHintCard(
+                title: 'Quick start',
+                message:
+                    'Use Scan Doc for camera documents, PDF Tools for page actions, and Convert for format changes.',
+                onDismiss: () {
+                  AppSettings.dismissTip('home.quickstart');
+                  setState(() {});
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -233,15 +248,6 @@ class _RecentFilesSection extends StatelessWidget {
     }
   }
 
-  Future<void> _copyPath(BuildContext context, FileItem file) async {
-    if (file.path == null || file.path!.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: file.path!));
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Path copied')),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -285,6 +291,8 @@ class _RecentFilesSection extends StatelessWidget {
                     color: isDark
                         ? const Color(0xFFCBD5E1)
                         : const Color(0xFF64748B),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               )
@@ -297,7 +305,8 @@ class _RecentFilesSection extends StatelessWidget {
                         final path = file.path;
                         if (path == null || path.isEmpty) {
                           if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          UiSafety.showSnackBar(
+                            context,
                             const SnackBar(
                                 content: Text(
                                     'This item has no file path to open.')),
@@ -367,7 +376,8 @@ class _RecentFilesSection extends StatelessWidget {
                                       color: isDark
                                           ? const Color(0xFF94A3B8)
                                           : const Color(0xFF64748B),
-                                      fontSize: 12,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ],
@@ -402,10 +412,23 @@ class _RecentFilesSection extends StatelessWidget {
                                   await _openFile(context, file);
                                 } else if (value == 'share') {
                                   await _shareFile(context, file);
-                                } else if (value == 'copy') {
-                                  await _copyPath(context, file);
                                 } else if (value == 'remove') {
+                                  final removed = file;
                                   FileStore.removeById(file.id);
+                                  if (!context.mounted) return;
+                                  UiSafety.showSnackBar(
+                                    context,
+                                    SnackBar(
+                                      content:
+                                          Text('"${removed.name}" removed'),
+                                      action: SnackBarAction(
+                                        label: 'Undo',
+                                        onPressed: () => FileStore.restore(
+                                            removed,
+                                            index: 0),
+                                      ),
+                                    ),
+                                  );
                                 }
                               },
                               itemBuilder: (ctx) => [
@@ -425,17 +448,6 @@ class _RecentFilesSection extends StatelessWidget {
                                   child: _RecentFileMenuRow(
                                     icon: Icons.share_outlined,
                                     label: 'Share',
-                                    iconColor: const Color(0xFF1857E6),
-                                    isDark: isDark,
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'copy',
-                                  enabled: file.path != null &&
-                                      file.path!.isNotEmpty,
-                                  child: _RecentFileMenuRow(
-                                    icon: Icons.link_rounded,
-                                    label: 'Copy path',
                                     iconColor: const Color(0xFF1857E6),
                                     isDark: isDark,
                                   ),
@@ -515,69 +527,11 @@ class _AppDrawer extends StatelessWidget {
           children: [
             const SizedBox(height: 4),
             _DrawerActionTile(
-              icon: Icons.privacy_tip_outlined,
-              label: 'Privacy Policy',
+              icon: Icons.settings_outlined,
+              label: 'Settings',
               onTap: () {
                 Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const _InfoPage(
-                      title: 'Privacy Policy',
-                      content: 'Privacy Policy (Last updated: 29 Apr 2026)\n\n'
-                          '1) What we process:\n'
-                          'OfficeTools Pro processes only files you explicitly select. Many operations run on-device, while optional features (OCR, remove background, some conversions) may send content to selected third-party APIs.\n\n'
-                          '2) Data handling:\n'
-                          'We do not claim ownership of your files. Outputs are stored locally on your device unless you share/export them. External API usage depends on your configured keys and providers.\n\n'
-                          '3) Your control:\n'
-                          'You can remove generated files from in-app history any time. For sensitive content, use local-only tools when possible.\n\n'
-                          '4) Contact:\n'
-                          'For privacy requests or concerns: faujitec@gmail.com',
-                    ),
-                  ),
-                );
-              },
-            ),
-            _DrawerActionTile(
-              icon: Icons.description_outlined,
-              label: 'Terms of Reference',
-              onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const _InfoPage(
-                      title: 'Terms of Reference',
-                      content:
-                          'Terms of Reference (Last updated: 29 Apr 2026)\n\n'
-                          '1) Acceptable use:\n'
-                          'You agree to use OfficeTools Pro lawfully and only for files you own or are authorized to process.\n\n'
-                          '2) Third-party services:\n'
-                          'Some features rely on external APIs. You are responsible for API keys, provider terms, data transfer, limits, and billing.\n\n'
-                          '3) Service scope:\n'
-                          'The app is provided on an as-is basis. We aim for reliability but cannot guarantee uninterrupted operation for every format/device combination.\n\n'
-                          '4) Liability and contact:\n'
-                          'You remain responsible for validating outputs before official use. For legal/support questions: faujitec@gmail.com',
-                    ),
-                  ),
-                );
-              },
-            ),
-            _DrawerActionTile(
-              icon: Icons.info_outline,
-              label: 'About This App',
-              onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const _InfoPage(
-                      title: 'About This App',
-                      content:
-                          'OfficeTools Pro is an all-in-one productivity utility for everyday document and image workflows.\n\n'
-                          'You can scan documents with OCR, convert between common formats, merge/split/rearrange PDFs, rotate or delete pages, and run image tools like resize, crop, format conversion, compression, and background removal.\n\n'
-                          'The app also includes file management actions so you can preview, open, and share processed outputs quickly from one place.\n\n'
-                          'Some advanced features use cloud APIs (for example OCR or certain conversions), while many tools run locally on-device. For best privacy, avoid uploading sensitive files unless you trust the configured service providers.',
-                    ),
-                  ),
-                );
+                Navigator.pushNamed(context, '/settings');
               },
             ),
             const SizedBox(height: 8),
@@ -636,6 +590,127 @@ class _AppDrawer extends StatelessWidget {
                       ThemeController.mode.value =
                           enabled ? ThemeMode.dark : ThemeMode.light;
                     },
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            _DrawerActionTile(
+              icon: Icons.privacy_tip_outlined,
+              label: 'Privacy Policy',
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const _InfoPage(
+                      title: 'Privacy Policy',
+                      content: 'Privacy Policy (Last updated: 06 May 2026)\n\n'
+                          'OfficeTools Pro is designed as a utility-first app. We process files that you choose and only for the operations you trigger.\n\n'
+                          '1) Scope of data processing\n'
+                          '- The app can process PDFs, images, text, and office files selected by you.\n'
+                          '- Most features (merge/split/rearrange PDFs, image resize/crop/compress, calculator tools) run locally on your device.\n'
+                          '- Some optional features may call third-party services when enabled (for example CloudConvert-based conversions).\n\n'
+                          '2) What is stored on device\n'
+                          '- Generated outputs are stored locally in the app output folder.\n'
+                          '- Recent/My Files history is stored locally to help you reopen files quickly.\n'
+                          '- App preferences (theme, settings toggles) are stored locally.\n'
+                          '- We do not maintain a user account system in the app.\n\n'
+                          '3) Cloud features and third-party providers\n'
+                          '- Cloud conversion features are optional and can be disabled in Settings.\n'
+                          '- If enabled, selected file content may be transmitted to the configured provider to complete conversion.\n'
+                          '- Provider behavior, retention, and compliance are governed by that provider\'s policy.\n'
+                          '- Avoid sending highly sensitive documents to cloud providers unless your organization approves it.\n\n'
+                          '4) File ownership and responsibility\n'
+                          '- You retain ownership of your files and outputs.\n'
+                          '- You are responsible for rights/permissions to process shared or third-party documents.\n\n'
+                          '5) Security notes\n'
+                          '- We aim to keep local data handling simple and minimal.\n'
+                          '- No system is 100% risk-free; keep backups for important files.\n'
+                          '- Use device lock and platform security features for stronger protection.\n\n'
+                          '6) Your controls\n'
+                          '- Remove file entries from My Files anytime.\n'
+                          '- Disable cloud features in Settings.\n'
+                          '- Use local-only tools where privacy is critical.\n\n'
+                          '7) Contact\n'
+                          'For privacy questions or data-handling concerns: faujitec@gmail.com',
+                    ),
+                  ),
+                );
+              },
+            ),
+            _DrawerActionTile(
+              icon: Icons.description_outlined,
+              label: 'Terms of Reference',
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const _InfoPage(
+                      title: 'Terms of Reference',
+                      content:
+                          'Terms of Reference (Last updated: 06 May 2026)\n\n'
+                          'By using OfficeTools Pro, you agree to the following:\n\n'
+                          '1) Acceptable use\n'
+                          '- Use the app only for lawful purposes.\n'
+                          '- Process only files you own or are authorized to use.\n'
+                          '- Do not use the app to violate privacy, IP, or regulatory obligations.\n\n'
+                          '2) Accuracy and verification\n'
+                          '- The app provides utility operations and best-effort processing.\n'
+                          '- You must review outputs before legal, financial, compliance, or production submission.\n'
+                          '- OCR, conversion, and compression may vary by source quality and file structure.\n\n'
+                          '3) Third-party services\n'
+                          '- Some features depend on third-party APIs and internet access.\n'
+                          '- You are responsible for API keys, billing, usage limits, and provider terms.\n'
+                          '- We are not responsible for provider outages, policy changes, or pricing changes.\n\n'
+                          '4) Availability and compatibility\n'
+                          '- Features may differ by platform/device capability.\n'
+                          '- Very large or malformed files may fail or perform slowly.\n'
+                          '- We may update, improve, or retire features to maintain app quality.\n\n'
+                          '5) Data and backup responsibility\n'
+                          '- Keep backups of important files.\n'
+                          '- You are responsible for secure handling, retention, and sharing of outputs.\n\n'
+                          '6) Limitation of liability\n'
+                          '- The app is provided "as is" without warranty of uninterrupted availability.\n'
+                          '- To the maximum extent permitted by law, we are not liable for indirect or consequential losses arising from app use.\n\n'
+                          '7) Contact\n'
+                          'For support or legal/terms questions: faujitec@gmail.com',
+                    ),
+                  ),
+                );
+              },
+            ),
+            _DrawerActionTile(
+              icon: Icons.info_outline,
+              label: 'About This App',
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const _InfoPage(
+                      title: 'About This App',
+                      content:
+                          'OfficeTools Pro is an all-in-one document and image productivity workspace built for fast daily tasks.\n\n'
+                          'What you can do:\n'
+                          '- Scan documents with crop, rotate, filter, and PDF output\n'
+                          '- Work with PDFs: merge, split, rearrange, rotate, delete, compress, protect, and OCR\n'
+                          '- Use image tools: resize, crop, format convert, compress, and background removal\n'
+                          '- Use conversion tools: image/text/office conversion (local and cloud-supported paths)\n'
+                          '- Manage generated outputs in My Files with open/share/rename/folder actions\n\n'
+                          'Design goals:\n'
+                          '- Keep common operations simple and fast\n'
+                          '- Prefer local processing where practical\n'
+                          '- Provide clear progress, error messaging, and output visibility\n\n'
+                          'Current app highlights:\n'
+                          '- Adaptive previews for better portrait/landscape viewing\n'
+                          '- Smoother PDF preview and large-file handling improvements\n'
+                          '- Enhanced calculator experience with sliders, presets, and schedule breakdowns\n'
+                          '- Centralized settings for quality, cloud toggles, and scan behavior\n\n'
+                          'Cloud-aware workflow:\n'
+                          '- Some high-fidelity conversions use third-party cloud APIs when configured\n'
+                          '- You can disable cloud features in Settings for privacy-first usage\n\n'
+                          'Support and feedback:\n'
+                          'We continuously improve based on user reports. For support or suggestions: faujitec@gmail.com',
+                    ),
                   ),
                 );
               },
@@ -722,8 +797,6 @@ class _InfoPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const InlineBannerAd(),
-            const SizedBox(height: 12),
             Expanded(
               child: SingleChildScrollView(
                 child: Text(
