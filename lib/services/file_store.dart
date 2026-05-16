@@ -47,6 +47,7 @@ class FileStore {
       files.value = list;
     } catch (_) {
       // Corrupt or incompatible cache — ignore.
+      debugPrint('[file_store] load failed (ignored)');
     }
   }
 
@@ -57,6 +58,7 @@ class FileStore {
       await prefs.setString(_prefsKey, payload);
     } catch (_) {
       // Storage full or prefs unavailable — non-fatal.
+      debugPrint('[file_store] save failed (ignored)');
     }
   }
 

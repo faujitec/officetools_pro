@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:office_toolspro/utils/scroll_insets.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
 
 enum _CalcTab { gst, sip, emi, simple }
@@ -416,8 +417,9 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final bottomPad = edgeToEdgeBottomPadding(context);
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Calculators'),
         actions: [
@@ -435,8 +437,10 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
           const InlineBannerAd(),
           const SizedBox(height: 8),
           Expanded(
-            child: ListView(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
+            child: ColoredBox(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              child: ListView(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
               children: [
                 Wrap(
                   spacing: 8,
@@ -831,6 +835,7 @@ class _CalculatorsScreenState extends State<CalculatorsScreen> {
                     ),
                   ),
               ],
+            ),
             ),
           ),
         ],

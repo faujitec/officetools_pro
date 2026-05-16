@@ -10,8 +10,7 @@ import {
   FileDown,
   Trash2,
   Lock,
-  ScanLine,
-  FileSpreadsheet
+  ScanLine
 } from 'lucide-react';
 
 import { Screen } from './types';
@@ -47,6 +46,5 @@ export const CONVERT_TOOLS = [
   { id: 'pdf-word', name: 'PDF to Word', icon: FileText, color: 'bg-blue-100 text-blue-600' },
   { id: 'word-pdf', name: 'Word to PDF', icon: FileText, color: 'bg-red-100 text-red-600' },
   { id: 'img-pdf', name: 'Image to PDF', icon: Image, color: 'bg-blue-100 text-blue-600' },
-  { id: 'excel-pdf', name: 'Excel to PDF', icon: FileSpreadsheet, color: 'bg-green-100 text-green-600' },
 ];
 

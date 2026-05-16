@@ -46,10 +46,10 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Camera access is required to capture documents for OCR.</string>
+	<string>Camera access is required to scan and capture documents.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Photo library access is required to select images for OCR.</string>
+	<string>Photo library access is required to select images for document tools.</string>
 	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-3940256099942544~1458002511</string>
+	<string>ca-app-pub-9040268910945565~1320297049</string>
 </dict>
 </plist>

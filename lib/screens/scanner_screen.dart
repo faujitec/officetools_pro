@@ -1,8 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
-import 'dart:async';
-
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
@@ -12,12 +11,14 @@ import 'package:office_toolspro/models/file_item.dart';
 import 'package:office_toolspro/services/app_settings.dart';
 import 'package:office_toolspro/services/file_store.dart';
 import 'package:office_toolspro/services/output_location_service.dart';
+import 'package:office_toolspro/utils/scroll_insets.dart';
 import 'package:office_toolspro/utils/ui_safety.dart';
 import 'package:office_toolspro/widgets/context_hint_card.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart';
+
+enum _CameraUiState { loading, denied, noCamera, initFailed, ready }
 
 enum _ScanStage { capture, edit, filter, review }
 
@@ -30,8 +31,7 @@ class _ScanPage {
 }
 
 class ScannerScreen extends StatefulWidget {
-  final String apiKey;
-  const ScannerScreen({super.key, required this.apiKey});
+  const ScannerScreen({super.key});
 
   @override
   State<ScannerScreen> createState() => _ScannerScreenState();
@@ -40,6 +40,7 @@ class ScannerScreen extends StatefulWidget {
 class _ScannerScreenState extends State<ScannerScreen> {
   CameraController? _camera;
   List<CameraDescription> _cameras = const [];
+  _CameraUiState _cameraUi = _CameraUiState.loading;
   bool _flashOn = false;
   bool _busy = false;
   _ScanStage _stage = _ScanStage.capture;
@@ -153,19 +154,56 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 
   Future<void> _initCamera() async {
-    final status = await Permission.camera.request();
-    if (!status.isGranted) return;
-    _cameras = await availableCameras();
-    if (_cameras.isEmpty) return;
-    final controller = CameraController(
-      _cameras.first,
-      ResolutionPreset.high,
-      enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.jpeg,
-    );
-    await controller.initialize();
     if (!mounted) return;
-    setState(() => _camera = controller);
+    setState(() {
+      _cameraUi = _CameraUiState.loading;
+      _camera?.dispose();
+      _camera = null;
+    });
+
+    final status = await Permission.camera.request();
+    if (!mounted) return;
+    if (!status.isGranted) {
+      setState(() => _cameraUi = _CameraUiState.denied);
+      return;
+    }
+
+    try {
+      _cameras = await availableCameras();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _cameraUi = _CameraUiState.initFailed);
+      return;
+    }
+    if (!mounted) return;
+    if (_cameras.isEmpty) {
+      setState(() => _cameraUi = _CameraUiState.noCamera);
+      return;
+    }
+
+    CameraController? controller;
+    try {
+      controller = CameraController(
+        _cameras.first,
+        ResolutionPreset.high,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+      await controller.initialize();
+    } catch (_) {
+      await controller?.dispose();
+      if (!mounted) return;
+      setState(() => _cameraUi = _CameraUiState.initFailed);
+      return;
+    }
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+    setState(() {
+      _camera = controller;
+      _cameraUi = _CameraUiState.ready;
+    });
   }
 
   Future<void> _toggleFlash() async {
@@ -433,71 +471,68 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
     if (name == null || name.trim().isEmpty) return;
 
-    final doc = pw.Document();
-    for (final page in _pages) {
-      final decoded = img.decodeImage(page.bytes);
-      if (decoded == null) continue;
-      final mem = pw.MemoryImage(page.bytes);
-      doc.addPage(
-        pw.Page(
-          pageTheme: pw.PageTheme(
-            pageFormat: PdfPageFormat(
-              decoded.width.toDouble(),
-              decoded.height.toDouble(),
-            ),
-            margin: pw.EdgeInsets.zero,
-          ),
-          build: (_) => pw.SizedBox.expand(
-            child: pw.Image(mem, fit: pw.BoxFit.fill),
-          ),
-        ),
-      );
-    }
-    final bytes = await doc.save();
-    final dir = await OutputLocationService.resolveOutputDirectory();
-    final ts = DateTime.now().millisecondsSinceEpoch;
-    final fileName =
-        '${name.replaceAll(RegExp(r'[^a-zA-Z0-9_\- ]'), '').trim().replaceAll(' ', '_')}_$ts.pdf';
-    final path = '${dir.path}/$fileName';
-    await File(path).writeAsBytes(bytes, flush: true);
+    final doc = PdfDocument();
+    try {
+      for (final page in _pages) {
+        final decoded = img.decodeImage(page.bytes);
+        if (decoded == null) continue;
+        final w = decoded.width.toDouble();
+        final h = decoded.height.toDouble();
+        final section = doc.sections!.add();
+        section.pageSettings = PdfPageSettings(Size(w, h));
+        section.pageSettings.margins.all = 0;
+        final pdfPage = section.pages.add();
+        final bitmap = PdfBitmap(page.bytes);
+        pdfPage.graphics.drawImage(bitmap, Rect.fromLTWH(0, 0, w, h));
+      }
+      final bytes = await doc.save();
+      final dir = await OutputLocationService.resolveOutputDirectory();
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final fileName =
+          '${name.replaceAll(RegExp(r'[^a-zA-Z0-9_\- ]'), '').trim().replaceAll(' ', '_')}_$ts.pdf';
+      final path = '${dir.path}/$fileName';
+      await File(path).writeAsBytes(bytes, flush: true);
 
-    final thumbPath = '${dir.path}/thumb_$ts.jpg';
-    await File(thumbPath).writeAsBytes(_pages.first.bytes, flush: true);
+      final thumbPath = '${dir.path}/thumb_$ts.jpg';
+      await File(thumbPath).writeAsBytes(_pages.first.bytes, flush: true);
 
-    FileStore.addFile(
-      FileItem(
-        id: ts.toString(),
-        name: fileName,
-        type: FileType.pdf,
-        date: DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now()),
-        path: path,
-        thumbnailPath: thumbPath,
-      ),
-    );
-
-    if (AppSettings.state.value.keepOriginalScanCopy) {
-      final imageName =
-          '${name.replaceAll(RegExp(r'[^a-zA-Z0-9_\- ]'), '').trim().replaceAll(' ', '_')}_${ts}_original.jpg';
-      final imagePath = '${dir.path}/$imageName';
-      await File(imagePath).writeAsBytes(_pages.first.bytes, flush: true);
       FileStore.addFile(
         FileItem(
-          id: '${ts}_original',
-          name: imageName,
-          type: FileType.image,
+          id: ts.toString(),
+          name: fileName,
+          type: FileType.pdf,
           date: DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now()),
-          path: imagePath,
-          thumbnailPath: imagePath,
+          path: path,
+          thumbnailPath: thumbPath,
         ),
       );
-    }
 
-    if (!mounted) return;
-    UiSafety.showSnackBar(
-      context,
-      const SnackBar(content: Text('PDF saved to My Files')),
-    );
-    Navigator.pushNamed(context, '/my-files');
+      if (AppSettings.state.value.keepOriginalScanCopy) {
+        final imageName =
+            '${name.replaceAll(RegExp(r'[^a-zA-Z0-9_\- ]'), '').trim().replaceAll(' ', '_')}_${ts}_original.jpg';
+        final imagePath = '${dir.path}/$imageName';
+        await File(imagePath).writeAsBytes(_pages.first.bytes, flush: true);
+        FileStore.addFile(
+          FileItem(
+            id: '${ts}_original',
+            name: imageName,
+            type: FileType.image,
+            date: DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now()),
+            path: imagePath,
+            thumbnailPath: imagePath,
+          ),
+        );
+      }
+
+      if (!mounted) return;
+      UiSafety.showSnackBar(
+        context,
+        const SnackBar(content: Text('PDF saved to My Files')),
+      );
+      Navigator.pushNamed(context, '/my-files');
+    } finally {
+      doc.dispose();
+    }
   }
 
   @override
@@ -515,17 +550,18 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 
   Widget _buildCamera() {
-    final initialized = _camera?.value.isInitialized ?? false;
+    final showLive = _cameraUi == _CameraUiState.ready &&
+        _camera != null &&
+        _camera!.value.isInitialized;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
+        top: true,
+        bottom: false,
         child: Stack(
           children: [
-            Positioned.fill(
-              child: initialized
-                  ? CameraPreview(_camera!)
-                  : const Center(child: CircularProgressIndicator()),
-            ),
+            Positioned.fill(child: _buildCameraCenter()),
             Positioned(
               top: 12,
               left: 12,
@@ -537,57 +573,189 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 ),
               ),
             ),
-            Positioned(
-              top: 12,
-              right: 12,
-              child: CircleAvatar(
-                backgroundColor: Colors.black54,
-                child: IconButton(
-                  icon: Icon(_flashOn ? Icons.flash_on : Icons.flash_off,
-                      color: Colors.white),
-                  onPressed: _toggleFlash,
+            if (showLive)
+              Positioned(
+                top: 12,
+                right: 12,
+                child: CircleAvatar(
+                  backgroundColor: Colors.black54,
+                  child: IconButton(
+                    icon: Icon(
+                      _flashOn ? Icons.flash_on : Icons.flash_off,
+                      color: Colors.white,
+                    ),
+                    onPressed: _toggleFlash,
+                  ),
                 ),
               ),
-            ),
-            Positioned(
-              bottom: 28,
-              left: 0,
-              right: 0,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 22),
-                      child: _sourceAction(
-                        icon: Icons.photo_library_outlined,
-                        label: 'Upload',
-                        onTap: _pickFromGallery,
-                      ),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: _capture,
-                    child: Container(
-                      width: 78,
-                      height: 78,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 4),
-                      ),
-                      child: Container(
-                        margin: const EdgeInsets.all(10),
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
+            if (showLive)
+              Positioned(
+                bottom: 28,
+                left: 0,
+                right: 0,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 22),
+                        child: _sourceAction(
+                          icon: Icons.photo_library_outlined,
+                          label: 'Upload',
+                          onTap: _pickFromGallery,
                         ),
                       ),
                     ),
-                  ),
-                ],
+                    GestureDetector(
+                      onTap: _capture,
+                      child: Container(
+                        width: 78,
+                        height: 78,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 4),
+                        ),
+                        child: Container(
+                          margin: const EdgeInsets.all(10),
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCameraCenter() {
+    switch (_cameraUi) {
+      case _CameraUiState.denied:
+        return _cameraMessageView(
+          title: 'Camera access needed',
+          subtitle:
+              'Allow camera access to scan documents, or upload from your gallery.',
+          actions: [
+            FilledButton.icon(
+              onPressed: () async {
+                await openAppSettings();
+              },
+              icon: const Icon(Icons.settings),
+              label: const Text('Open settings'),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _initCamera,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white54),
+              ),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try again'),
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: _pickFromGallery,
+              icon: const Icon(Icons.photo_library_outlined,
+                  color: Colors.white70),
+              label: const Text('Pick from gallery',
+                  style: TextStyle(color: Colors.white70)),
+            ),
+          ],
+        );
+      case _CameraUiState.noCamera:
+        return _cameraMessageView(
+          title: 'No camera found',
+          subtitle:
+              'This device may not expose a camera. You can still upload images.',
+          actions: [
+            FilledButton.icon(
+              onPressed: _pickFromGallery,
+              icon: const Icon(Icons.photo_library_outlined),
+              label: const Text('Pick from gallery'),
+            ),
+          ],
+        );
+      case _CameraUiState.initFailed:
+        return _cameraMessageView(
+          title: 'Camera could not start',
+          subtitle:
+              'Close other apps using the camera, then try again or upload from gallery.',
+          actions: [
+            FilledButton.icon(
+              onPressed: _initCamera,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try again'),
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: _pickFromGallery,
+              icon: const Icon(Icons.photo_library_outlined,
+                  color: Colors.white70),
+              label: const Text('Pick from gallery',
+                  style: TextStyle(color: Colors.white70)),
+            ),
+          ],
+        );
+      case _CameraUiState.ready:
+        final c = _camera;
+        if (c == null || !c.value.isInitialized) {
+          return const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          );
+        }
+        return CameraPreview(c);
+      case _CameraUiState.loading:
+        return const Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        );
+    }
+  }
+
+  Widget _cameraMessageView({
+    required String title,
+    required String subtitle,
+    required List<Widget> actions,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.videocam_off_outlined,
+              size: 56,
+              color: Colors.grey.shade400,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 20,
               ),
             ),
+            const SizedBox(height: 10),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.grey.shade400,
+                height: 1.35,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 24),
+            ...actions,
           ],
         ),
       ),
@@ -622,6 +790,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     final data = _captured;
     if (data == null) return const SizedBox.shrink();
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Edit Document'),
         actions: [
@@ -655,7 +824,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: Column(
         children: [
           const SizedBox(height: 8),
           if (AppSettings.shouldShowTip('scanner.crop')) ...[
@@ -809,7 +980,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
               12,
               10,
               12,
-              16 + MediaQuery.of(context).padding.bottom,
+              16 + edgeToEdgeBottomPadding(context),
             ),
             child: Column(
               children: [
@@ -843,16 +1014,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
+                      flex: 2,
                       child: FilledButton(
                         onPressed: _cropWithCorners,
-                        child: const Text('Crop'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton.tonal(
-                        onPressed: _cropWithCorners,
-                        child: const Text('Continue'),
+                        child: const Text('Continue to filters'),
                       ),
                     ),
                   ],
@@ -862,6 +1027,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -870,8 +1036,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
     if (data == null) return const SizedBox.shrink();
     final preview = _filterPreviewBytes ?? data;
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Apply Filter')),
-      body: Column(
+      body: ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: Column(
         children: [
           const SizedBox(height: 8),
           Expanded(
@@ -935,7 +1104,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
               12,
               10,
               12,
-              16 + MediaQuery.of(context).padding.bottom,
+              16 + edgeToEdgeBottomPadding(context),
             ),
             child: Row(
               children: [
@@ -957,6 +1126,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -1106,8 +1276,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
   Widget _buildReview() {
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Review & Save')),
-      body: Column(
+      body: ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: Column(
         children: [
           const SizedBox(height: 8),
           const InlineBannerAd(),
@@ -1334,7 +1507,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
               12,
               8,
               12,
-              16 + MediaQuery.of(context).padding.bottom,
+              16 + edgeToEdgeBottomPadding(context),
             ),
             child: SizedBox(
               width: double.infinity,
@@ -1346,6 +1519,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

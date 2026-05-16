@@ -16,8 +16,11 @@ import 'package:office_toolspro/services/compress_service.dart';
 import 'package:office_toolspro/services/file_store.dart';
 import 'package:office_toolspro/services/ocr_service.dart';
 import 'package:office_toolspro/services/output_location_service.dart';
+import 'package:office_toolspro/services/pdf_tools_isolate.dart';
 import 'package:office_toolspro/services/pdf_tools_service.dart';
 import 'package:office_toolspro/services/selfie_segmentation_service.dart';
+import 'package:office_toolspro/utils/scroll_insets.dart';
+import 'package:office_toolspro/utils/system_ui.dart';
 import 'package:office_toolspro/utils/ui_safety.dart';
 import 'package:office_toolspro/widgets/context_hint_card.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
@@ -92,14 +95,12 @@ const List<ToolOption> convertTools = <ToolOption>[
     id: 'pdf-word',
     name: 'PDF to Word',
     icon: Icons.description_outlined,
-    requiresInternet: true,
     isBeta: true,
   ),
   ToolOption(
     id: 'word-pdf',
     name: 'Word to PDF',
     icon: Icons.picture_as_pdf_outlined,
-    requiresInternet: true,
     isBeta: true,
   ),
   ToolOption(id: 'img-pdf', name: 'Image to PDF', icon: Icons.image_outlined),
@@ -109,12 +110,6 @@ const List<ToolOption> convertTools = <ToolOption>[
       icon: Icons.photo_size_select_large_outlined),
   ToolOption(
       id: 'text-pdf', name: 'Text to PDF', icon: Icons.text_snippet_outlined),
-  ToolOption(
-    id: 'excel-pdf',
-    name: 'Excel to PDF',
-    icon: Icons.table_chart_outlined,
-    requiresInternet: true,
-  ),
   ToolOption(
     id: 'compress-word',
     name: 'Compress Word',
@@ -144,8 +139,7 @@ class ImageToolsScreen extends StatelessWidget {
 }
 
 class PdfToolsScreen extends StatelessWidget {
-  final String apiKey;
-  const PdfToolsScreen({super.key, required this.apiKey});
+  const PdfToolsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -155,7 +149,7 @@ class PdfToolsScreen extends StatelessWidget {
       onTap: (tool) {
         Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => PdfProcessingScreen(tool: tool, apiKey: apiKey),
+            builder: (_) => PdfProcessingScreen(tool: tool),
           ),
         );
       },
@@ -176,14 +170,17 @@ class _ToolListScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bottomInset = MediaQuery.of(context).padding.bottom;
-    return Scaffold(
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bottomPad = edgeToEdgeBottomPadding(context, extra: 20);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlayForTheme(theme),
+      child: Scaffold(
       resizeToAvoidBottomInset: true,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        surfaceTintColor: Theme.of(context).scaffoldBackgroundColor,
+        backgroundColor: theme.scaffoldBackgroundColor,
+        surfaceTintColor: theme.scaffoldBackgroundColor,
         title: Text(
           title,
           style: TextStyle(
@@ -194,52 +191,60 @@ class _ToolListScaffold extends StatelessWidget {
           ),
         ),
       ),
-      body: Column(
-        children: [
-          const SizedBox(height: 8),
-          if (AppSettings.shouldShowTip('tools.$title')) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: ContextHintCard(
-                title: '$title tip',
-                message:
-                    'Pick a file, preview the result, then open from My Files. Long jobs may take a few seconds.',
-                onDismiss: () {
-                  AppSettings.dismissTip('tools.$title');
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          const InlineBannerAd(),
-          const SizedBox(height: 8),
-          Expanded(
-            child: ListView.separated(
-              padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + bottomInset),
-              itemCount: tools.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final tool = tools[index];
-                return _ToolListTile(
-                  tool: tool,
-                  onTap: () {
-                    AnalyticsService.logEvent('tool_open',
-                        props: {'tool_id': tool.id});
-                    onTap(tool);
+      body: ValueListenableBuilder<AppSettingsState>(
+        valueListenable: AppSettings.state,
+        builder: (context, settings, _) {
+          return Column(
+            children: [
+              const SizedBox(height: 8),
+              if (AppSettings.shouldShowTip('tools.$title')) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: ContextHintCard(
+                    title: '$title tip',
+                    message:
+                        'Pick a file, preview the result, then open from My Files. Long jobs may take a few seconds.',
+                    onDismiss: () {
+                      AppSettings.dismissTip('tools.$title');
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              const InlineBannerAd(),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ColoredBox(
+                  color: theme.scaffoldBackgroundColor,
+                  child: ListView.separated(
+                  padding: EdgeInsets.fromLTRB(20, 12, 20, bottomPad),
+                  itemCount: tools.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final tool = tools[index];
+                    return _ToolListTile(
+                      tool: tool,
+                      onTap: () {
+                        AnalyticsService.logEvent('tool_open',
+                            props: {'tool_id': tool.id});
+                        onTap(tool);
+                      },
+                    );
                   },
-                );
-              },
-            ),
-          ),
-        ],
+                ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
       ),
     );
   }
 }
 
 class ConvertScreen extends StatefulWidget {
-  final String cloudConvertApiKey;
-  const ConvertScreen({super.key, required this.cloudConvertApiKey});
+  const ConvertScreen({super.key});
 
   @override
   State<ConvertScreen> createState() => _ConvertScreenState();
@@ -256,7 +261,6 @@ class _ConvertScreenState extends State<ConvertScreen> {
           MaterialPageRoute<void>(
             builder: (_) => _ConvertToolScreen(
               tool: tool,
-              cloudConvertApiKey: widget.cloudConvertApiKey,
             ),
           ),
         );
@@ -267,11 +271,9 @@ class _ConvertScreenState extends State<ConvertScreen> {
 
 class _ConvertToolScreen extends StatefulWidget {
   final ToolOption tool;
-  final String cloudConvertApiKey;
 
   const _ConvertToolScreen({
     required this.tool,
-    required this.cloudConvertApiKey,
   });
 
   @override
@@ -319,10 +321,6 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
         type = fp.FileType.custom;
         allowed = ['doc', 'docx'];
         break;
-      case 'excel-pdf':
-        type = fp.FileType.custom;
-        allowed = ['xls', 'xlsx'];
-        break;
       case 'compress-word':
         type = fp.FileType.custom;
         allowed = ['doc', 'docx'];
@@ -351,8 +349,6 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
   }
 
   Future<void> _convert() async {
-    final canUseCloud = AppSettings.state.value.cloudFeaturesEnabled &&
-        widget.cloudConvertApiKey.isNotEmpty;
     _timer?.cancel();
     setState(() {
       _processing = true;
@@ -369,67 +365,31 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
       if (mounted) setState(() => _progress += 10);
     });
     try {
-      final service =
-          ConvertService(cloudConvertApiKey: widget.cloudConvertApiKey);
+      const service = ConvertService();
       ConvertResult result;
       String successMessage = 'Saved output to My Files';
       if (widget.tool.id == 'img-pdf') {
         if (_selectedFile?.bytes == null) {
           throw Exception('Select an image first');
         }
-        result = service.imageToPdf(_selectedFile!.bytes!);
+        result = await service.imageToPdfAsync(_selectedFile!.bytes!);
         _conversionModeLabel = 'Local';
       } else if (widget.tool.id == 'pdf-word') {
         if (_selectedFile?.bytes == null) {
           throw Exception('Select a PDF first');
         }
-        if (canUseCloud) {
-          result = await service.cloudConvert(
-            inputBytes: _selectedFile!.bytes!,
-            fileName: _selectedFile!.name,
-            inputFormat: 'pdf',
-            outputFormat: 'docx',
-          );
-          _conversionModeLabel = 'Cloud fidelity';
-        } else {
-          result = service.pdfToWordBasic(_selectedFile!.bytes!);
-          successMessage =
-              'Saved basic DOCX (text-focused). Complex layout may differ.';
-          _conversionModeLabel = 'Basic free';
-        }
+        result = service.pdfToWordBasic(_selectedFile!.bytes!);
+        successMessage =
+            'Saved basic DOCX (text-focused). Complex layout may differ.';
+        _conversionModeLabel = 'Basic';
       } else if (widget.tool.id == 'word-pdf') {
         if (_selectedFile?.bytes == null) {
           throw Exception('Select a DOCX first');
         }
-        if (canUseCloud) {
-          result = await service.cloudConvert(
-            inputBytes: _selectedFile!.bytes!,
-            fileName: _selectedFile!.name,
-            inputFormat: 'docx',
-            outputFormat: 'pdf',
-          );
-          _conversionModeLabel = 'Cloud fidelity';
-        } else {
-          result = service.wordToPdfBasic(_selectedFile!.bytes!);
-          successMessage =
-              'Saved basic PDF (text-focused). Complex layout may differ.';
-          _conversionModeLabel = 'Basic free';
-        }
-      } else if (widget.tool.id == 'excel-pdf') {
-        if (_selectedFile?.bytes == null) {
-          throw Exception('Select an XLS/XLSX first');
-        }
-        if (!canUseCloud) {
-          throw Exception('EXCEL_CLOUD_REQUIRED');
-        }
-        final ext = (_selectedFile!.extension ?? 'xlsx').toLowerCase();
-        result = await service.cloudConvert(
-          inputBytes: _selectedFile!.bytes!,
-          fileName: _selectedFile!.name,
-          inputFormat: ext == 'xls' ? 'xls' : 'xlsx',
-          outputFormat: 'pdf',
-        );
-        _conversionModeLabel = 'Cloud fidelity';
+        result = service.wordToPdfBasic(_selectedFile!.bytes!);
+        successMessage =
+            'Saved basic PDF (text-focused). Complex layout may differ.';
+        _conversionModeLabel = 'Basic';
       } else if (widget.tool.id == 'compress-word') {
         if (_selectedFile?.bytes == null) {
           throw Exception('Select a DOC/DOCX first');
@@ -457,7 +417,7 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
         if (_textController.text.trim().isEmpty) {
           throw Exception('Enter text first');
         }
-        result = service.textToPdf(_textController.text);
+        result = await service.textToPdfAsync(_textController.text);
         _conversionModeLabel = 'Local';
       } else {
         throw Exception('Unsupported convert tool');
@@ -505,12 +465,7 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
       });
       final errorText = e.toString();
       String message = 'Could not convert. Check file type/size and retry.';
-      if (errorText.contains('CLOUDCONVERT_API_KEY')) {
-        message = 'This conversion requires CloudConvert API key.';
-      } else if (errorText.contains('EXCEL_CLOUD_REQUIRED')) {
-        message =
-            'Excel to PDF needs CloudConvert key. Free basic mode is available for PDF↔Word only.';
-      } else if (errorText.contains('No internet connection')) {
+      if (errorText.contains('No internet connection')) {
         message = 'No internet connection. Please reconnect and retry.';
       } else if (errorText.contains('timed out')) {
         message = 'Conversion request timed out. Please retry.';
@@ -531,38 +486,43 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.tool.name)),
-      body: SafeArea(
-        top: false,
-        child: Column(
+    final theme = Theme.of(context);
+    final bottomPad = edgeToEdgeBottomPadding(context);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlayForTheme(theme),
+      child: Scaffold(
+        backgroundColor: theme.scaffoldBackgroundColor,
+        resizeToAvoidBottomInset: true,
+        appBar: AppBar(
+          backgroundColor: theme.scaffoldBackgroundColor,
+          surfaceTintColor: theme.scaffoldBackgroundColor,
+          title: Text(widget.tool.name),
+        ),
+        body: Column(
           children: [
             const SizedBox(height: 8),
             const InlineBannerAd(),
             const SizedBox(height: 8),
             Expanded(
-              child: Stack(
-                children: [
-                  ListView(
-                    padding: EdgeInsets.fromLTRB(
-                      16,
-                      16,
-                      16,
-                      16 + MediaQuery.of(context).padding.bottom,
-                    ),
-                    children: [
+              child: ColoredBox(
+                color: theme.scaffoldBackgroundColor,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ListView(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, bottomPad),
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      children: [
                       if ((widget.tool.id == 'pdf-word' ||
-                              widget.tool.id == 'word-pdf' ||
-                              widget.tool.id == 'excel-pdf') &&
-                          AppSettings.shouldShowTip('convert.cloud')) ...[
+                              widget.tool.id == 'word-pdf') &&
+                          AppSettings.shouldShowTip('convert.basic')) ...[
                         ContextHintCard(
-                          title: 'Conversion mode',
-                          message: (widget.cloudConvertApiKey.isEmpty ||
-                                  !AppSettings.state.value.cloudFeaturesEnabled)
-                              ? 'Free basic conversion is active (text-focused). Enable CloudConvert for higher-fidelity layout conversion.'
-                              : 'High-fidelity cloud conversion is enabled. Free basic conversion remains available when cloud is disabled.',
+                          title: 'On-device conversion',
+                          message:
+                              'PDF and Word conversions use simple on-device text extraction. Formatting and complex layout may differ from the original.',
                           onDismiss: () {
-                            AppSettings.dismissTip('convert.cloud');
+                            AppSettings.dismissTip('convert.basic');
                             setState(() {});
                           },
                         ),
@@ -669,15 +629,13 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 10, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color:
-                                        _conversionModeLabel == 'Cloud fidelity'
-                                            ? const Color(0xFFE0F2FE)
-                                            : const Color(0xFFECFDF5),
+                                    color: _conversionModeLabel == 'Basic'
+                                        ? const Color(0xFFFEF9C3)
+                                        : const Color(0xFFECFDF5),
                                     borderRadius: BorderRadius.circular(999),
                                     border: Border.all(
-                                      color: _conversionModeLabel ==
-                                              'Cloud fidelity'
-                                          ? const Color(0xFF7DD3FC)
+                                      color: _conversionModeLabel == 'Basic'
+                                          ? const Color(0xFFFDE047)
                                           : const Color(0xFF86EFAC),
                                     ),
                                   ),
@@ -726,9 +684,10 @@ class _ConvertToolScreenState extends State<_ConvertToolScreen> {
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    ),
     );
   }
 }
@@ -1230,7 +1189,9 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
         'tool_fail',
         props: {'tool_id': widget.tool.id, 'code': _lastErrorCode ?? 'FAIL'},
       );
-    } catch (_) {
+    } catch (e) {
+      AnalyticsService.logEvent('img_tool_fail',
+          props: {'tool_id': widget.tool.id, 'msg': e.toString()});
       if (!mounted) return;
       setState(() {
         _processing = false;
@@ -1303,663 +1264,668 @@ class _ImageProcessingScreenState extends State<ImageProcessingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        surfaceTintColor: Theme.of(context).scaffoldBackgroundColor,
-        title: Text(
-          widget.tool.name,
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            color: isDark ? Colors.white : const Color(0xFF0F172A),
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final scaffoldBg = theme.scaffoldBackgroundColor;
+    final bottomPad = edgeToEdgeBottomPadding(context);
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlayForTheme(theme),
+      child: Scaffold(
+        backgroundColor: scaffoldBg,
+        resizeToAvoidBottomInset: true,
+        appBar: AppBar(
+          backgroundColor: scaffoldBg,
+          surfaceTintColor: scaffoldBg,
+          title: Text(
+            widget.tool.name,
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+            ),
           ),
         ),
-      ),
-      body: SafeArea(
-        top: false,
-        child: Column(
+        body: Column(
           children: [
             const SizedBox(height: 8),
             const InlineBannerAd(),
             const SizedBox(height: 8),
             Expanded(
-              child: Stack(
-                children: [
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      18,
-                      8,
-                      18,
-                      18 +
-                          MediaQuery.of(context).padding.bottom +
-                          MediaQuery.of(context).viewInsets.bottom,
-                    ),
-                    child: SingleChildScrollView(
+              child: ColoredBox(
+                color: scaffoldBg,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ListView(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, 16 + bottomPad),
                       keyboardDismissBehavior:
                           ScrollViewKeyboardDismissBehavior.onDrag,
-                      child: Column(
-                        children: [
-                          Center(
-                            child: SizedBox(
-                              width: double.infinity,
-                              child: AspectRatio(
-                                // Adapt preview canvas to source image shape in all
-                                // image tools so portrait photos are not squeezed.
-                                aspectRatio: (_decodedSource != null)
-                                    ? (_decodedSource!.width /
-                                            _decodedSource!.height)
-                                        .clamp(0.62, 1.6)
-                                    : 16 / 9,
-                                child: UploadDropCard(
-                                  isDark: isDark,
-                                  onTap: _pickImage,
-                                  title: 'Choose Image',
-                                  subtitle: 'Tap to upload from gallery',
-                                  preview: _previewBytes == null
-                                      ? null
-                                      : widget.tool.id == 'crop' &&
-                                              _decodedSource != null &&
-                                              _sourceBytes != null
-                                          ? ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(26),
-                                              child: LayoutBuilder(
-                                                builder: (context, cons) {
-                                                  final imgSize = Size(
-                                                    _decodedSource!.width
-                                                        .toDouble(),
-                                                    _decodedSource!.height
-                                                        .toDouble(),
-                                                  );
-                                                  final imageRect =
-                                                      containImageForBoxFit(
-                                                    Size(cons.maxWidth,
-                                                        cons.maxHeight),
-                                                    imgSize,
-                                                  );
-                                                  const hit = 48.0;
-                                                  final bytes = _sourceBytes!;
-                                                  return GestureDetector(
-                                                    behavior:
-                                                        HitTestBehavior.opaque,
-                                                    onPanStart: (d) {
-                                                      final local =
-                                                          d.localPosition;
-                                                      final corners = <Offset>[
-                                                        Offset(_cropL, _cropT),
-                                                        Offset(_cropR, _cropT),
-                                                        Offset(_cropR, _cropB),
-                                                        Offset(_cropL, _cropB),
-                                                      ];
-                                                      double best = 1e9;
-                                                      var idx = 0;
-                                                      for (var i = 0;
-                                                          i < 4;
-                                                          i++) {
-                                                        final p = Offset(
-                                                          imageRect.left +
-                                                              corners[i].dx *
-                                                                  imageRect
-                                                                      .width,
-                                                          imageRect.top +
-                                                              corners[i].dy *
-                                                                  imageRect
-                                                                      .height,
-                                                        );
-                                                        final dist = (p - local)
-                                                            .distance;
-                                                        if (dist < best) {
-                                                          best = dist;
-                                                          idx = i;
+                      children: [
+                          UploadDropCard(
+                            isDark: isDark,
+                            onTap: _pickImage,
+                            title: 'Choose Image',
+                            subtitle: 'Tap to upload from gallery',
+                            previewAspectRatio: _decodedSource != null
+                                ? (_decodedSource!.width /
+                                        _decodedSource!.height)
+                                    .clamp(0.62, 1.6)
+                                    .toDouble()
+                                : null,
+                            preview: _previewBytes == null
+                                        ? null
+                                        : widget.tool.id == 'crop' &&
+                                                _decodedSource != null &&
+                                                _sourceBytes != null
+                                            ? ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(26),
+                                                child: LayoutBuilder(
+                                                  builder: (context, cons) {
+                                                    final imgSize = Size(
+                                                      _decodedSource!.width
+                                                          .toDouble(),
+                                                      _decodedSource!.height
+                                                          .toDouble(),
+                                                    );
+                                                    final imageRect =
+                                                        containImageForBoxFit(
+                                                      Size(cons.maxWidth,
+                                                          cons.maxHeight),
+                                                      imgSize,
+                                                    );
+                                                    const hit = 48.0;
+                                                    final bytes = _sourceBytes!;
+                                                    return GestureDetector(
+                                                      behavior: HitTestBehavior
+                                                          .opaque,
+                                                      onPanStart: (d) {
+                                                        final local =
+                                                            d.localPosition;
+                                                        final corners =
+                                                            <Offset>[
+                                                          Offset(
+                                                              _cropL, _cropT),
+                                                          Offset(
+                                                              _cropR, _cropT),
+                                                          Offset(
+                                                              _cropR, _cropB),
+                                                          Offset(
+                                                              _cropL, _cropB),
+                                                        ];
+                                                        double best = 1e9;
+                                                        var idx = 0;
+                                                        for (var i = 0;
+                                                            i < 4;
+                                                            i++) {
+                                                          final p = Offset(
+                                                            imageRect.left +
+                                                                corners[i].dx *
+                                                                    imageRect
+                                                                        .width,
+                                                            imageRect.top +
+                                                                corners[i].dy *
+                                                                    imageRect
+                                                                        .height,
+                                                          );
+                                                          final dist =
+                                                              (p - local)
+                                                                  .distance;
+                                                          if (dist < best) {
+                                                            best = dist;
+                                                            idx = i;
+                                                          }
                                                         }
-                                                      }
-                                                      setState(() {
-                                                        _cropDragHandle =
-                                                            best <= hit
-                                                                ? idx
-                                                                : null;
-                                                      });
-                                                    },
-                                                    onPanUpdate: (d) {
-                                                      if (_cropDragHandle ==
-                                                          null) {
-                                                        return;
-                                                      }
-                                                      final nx = ((d.localPosition
-                                                                      .dx -
-                                                                  imageRect
-                                                                      .left) /
-                                                              imageRect.width)
-                                                          .clamp(0.0, 1.0);
-                                                      final ny =
-                                                          ((d.localPosition.dy -
-                                                                      imageRect
-                                                                          .top) /
-                                                                  imageRect
-                                                                      .height)
-                                                              .clamp(0.0, 1.0);
-                                                      setState(() {
-                                                        switch (
-                                                            _cropDragHandle!) {
-                                                          case 0:
-                                                            _cropL = nx;
-                                                            _cropT = ny;
-                                                            break;
-                                                          case 1:
-                                                            _cropR = nx;
-                                                            _cropT = ny;
-                                                            break;
-                                                          case 2:
-                                                            _cropR = nx;
-                                                            _cropB = ny;
-                                                            break;
-                                                          case 3:
-                                                            _cropL = nx;
-                                                            _cropB = ny;
-                                                            break;
-                                                        }
-                                                        if (_cropL > _cropR) {
-                                                          final t = _cropL;
-                                                          _cropL = _cropR;
-                                                          _cropR = t;
-                                                        }
-                                                        if (_cropT > _cropB) {
-                                                          final t = _cropT;
-                                                          _cropT = _cropB;
-                                                          _cropB = t;
-                                                        }
-                                                        _clampCropNorm();
-                                                      });
-                                                      _updatePreview();
-                                                    },
-                                                    onPanEnd: (_) {
-                                                      setState(() =>
+                                                        setState(() {
                                                           _cropDragHandle =
-                                                              null);
-                                                    },
-                                                    child: Stack(
-                                                      fit: StackFit.expand,
-                                                      children: [
-                                                        Center(
-                                                          child: Image.memory(
-                                                            bytes,
-                                                            fit: BoxFit.contain,
-                                                            errorBuilder: (_,
-                                                                    __, ___) =>
-                                                                const Center(
-                                                                    child: Text(
-                                                                        'Preview unavailable')),
+                                                              best <= hit
+                                                                  ? idx
+                                                                  : null;
+                                                        });
+                                                      },
+                                                      onPanUpdate: (d) {
+                                                        if (_cropDragHandle ==
+                                                            null) {
+                                                          return;
+                                                        }
+                                                        final nx = ((d.localPosition
+                                                                        .dx -
+                                                                    imageRect
+                                                                        .left) /
+                                                                imageRect.width)
+                                                            .clamp(0.0, 1.0);
+                                                        final ny = ((d.localPosition
+                                                                        .dy -
+                                                                    imageRect
+                                                                        .top) /
+                                                                imageRect
+                                                                    .height)
+                                                            .clamp(0.0, 1.0);
+                                                        setState(() {
+                                                          switch (
+                                                              _cropDragHandle!) {
+                                                            case 0:
+                                                              _cropL = nx;
+                                                              _cropT = ny;
+                                                              break;
+                                                            case 1:
+                                                              _cropR = nx;
+                                                              _cropT = ny;
+                                                              break;
+                                                            case 2:
+                                                              _cropR = nx;
+                                                              _cropB = ny;
+                                                              break;
+                                                            case 3:
+                                                              _cropL = nx;
+                                                              _cropB = ny;
+                                                              break;
+                                                          }
+                                                          if (_cropL > _cropR) {
+                                                            final t = _cropL;
+                                                            _cropL = _cropR;
+                                                            _cropR = t;
+                                                          }
+                                                          if (_cropT > _cropB) {
+                                                            final t = _cropT;
+                                                            _cropT = _cropB;
+                                                            _cropB = t;
+                                                          }
+                                                          _clampCropNorm();
+                                                        });
+                                                        _updatePreview();
+                                                      },
+                                                      onPanEnd: (_) {
+                                                        setState(() =>
+                                                            _cropDragHandle =
+                                                                null);
+                                                      },
+                                                      child: Stack(
+                                                        fit: StackFit.expand,
+                                                        children: [
+                                                          Center(
+                                                            child: Image.memory(
+                                                              bytes,
+                                                              fit: BoxFit
+                                                                  .contain,
+                                                              errorBuilder: (_,
+                                                                      __,
+                                                                      ___) =>
+                                                                  const Center(
+                                                                      child: Text(
+                                                                          'Preview unavailable')),
+                                                            ),
                                                           ),
-                                                        ),
-                                                        CustomPaint(
-                                                          size: Size(
-                                                              cons.maxWidth,
-                                                              cons.maxHeight),
-                                                          painter:
-                                                              _ImageCropOverlayPainter(
-                                                            imageRect:
-                                                                imageRect,
-                                                            cropL: _cropL,
-                                                            cropT: _cropT,
-                                                            cropR: _cropR,
-                                                            cropB: _cropB,
+                                                          CustomPaint(
+                                                            size: Size(
+                                                                cons.maxWidth,
+                                                                cons.maxHeight),
+                                                            painter:
+                                                                _ImageCropOverlayPainter(
+                                                              imageRect:
+                                                                  imageRect,
+                                                              cropL: _cropL,
+                                                              cropT: _cropT,
+                                                              cropR: _cropR,
+                                                              cropB: _cropB,
+                                                            ),
                                                           ),
-                                                        ),
-                                                      ],
+                                                        ],
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                              )
+                                            : ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(26),
+                                                child: Image.memory(
+                                                  (_showOriginalPreview &&
+                                                          _sourceBytes != null)
+                                                      ? _sourceBytes!
+                                                      : _previewBytes!,
+                                                  fit: BoxFit.contain,
+                                                  errorBuilder: (_, __, ___) =>
+                                                      const Center(
+                                                    child: Text(
+                                                      'Preview unavailable',
                                                     ),
-                                                  );
-                                                },
-                                              ),
-                                            )
-                                          : ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(26),
-                                              child: Image.memory(
-                                                (_showOriginalPreview &&
-                                                        _sourceBytes != null)
-                                                    ? _sourceBytes!
-                                                    : _previewBytes!,
-                                                fit: BoxFit.contain,
-                                                errorBuilder: (_, __, ___) =>
-                                                    const Center(
-                                                  child: Text(
-                                                    'Preview unavailable',
                                                   ),
                                                 ),
                                               ),
-                                            ),
-                                ),
-                              ),
-                            ),
                           ),
-                          const SizedBox(height: 16),
-                          if (_decodedSource != null) ...[
-                            if (_lastErrorCode != null) ...[
-                              _ErrorBanner(
-                                code: _lastErrorCode!,
-                                message: _lastErrorMessage ??
-                                    'Something went wrong.',
-                                onRetry: _decodedSource == null ? null : _start,
-                              ),
-                              const SizedBox(height: 10),
-                            ],
-                            if (_removeBgUnavailable)
-                              Container(
-                                width: double.infinity,
-                                margin: const EdgeInsets.only(bottom: 10),
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFFFF7ED),
-                                  border: Border.all(
-                                      color: const Color(0xFFFED7AA)),
-                                  borderRadius: BorderRadius.circular(12),
+                            const SizedBox(height: 16),
+                            if (_decodedSource != null) ...[
+                              if (_lastErrorCode != null) ...[
+                                _ErrorBanner(
+                                  code: _lastErrorCode!,
+                                  message: _lastErrorMessage ??
+                                      'Something went wrong.',
+                                  onRetry:
+                                      _decodedSource == null ? null : _start,
                                 ),
-                                child: const Text(
-                                  'Remove Background uses on-device ML Kit (Android & iOS only). Works best for photos with people.',
-                                  style: TextStyle(
-                                    color: Color(0xFF9A3412),
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12,
+                                const SizedBox(height: 10),
+                              ],
+                              if (_removeBgUnavailable)
+                                Container(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFF7ED),
+                                    border: Border.all(
+                                        color: const Color(0xFFFED7AA)),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Text(
+                                    'Remove Background uses on-device ML Kit (Android & iOS only). Works best for photos with people.',
+                                    style: TextStyle(
+                                      color: Color(0xFF9A3412),
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            if (widget.tool.id == 'remove-bg' &&
-                                _removedBgCutoutBytes != null) ...[
-                              Container(
-                                width: double.infinity,
-                                margin: const EdgeInsets.only(bottom: 10),
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF8FAFC),
-                                  border: Border.all(
-                                      color: const Color(0xFFE2E8F0)),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Background',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF0F172A),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        ChoiceChip(
-                                          label: const Text('Transparent'),
-                                          selected: _removeBgSolidColor == null,
-                                          onSelected: (_) {
-                                            setState(() {
-                                              _removeBgSolidColor = null;
-                                              _previewBytes =
-                                                  _removeBgOutputBytes();
-                                              _success = false;
-                                              _statusText = '';
-                                            });
-                                          },
+                              if (widget.tool.id == 'remove-bg' &&
+                                  _removedBgCutoutBytes != null) ...[
+                                Container(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF8FAFC),
+                                    border: Border.all(
+                                        color: const Color(0xFFE2E8F0)),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Background',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF0F172A),
                                         ),
-                                        ..._removeBgPalette.map((c) {
-                                          final selected =
-                                              _removeBgSolidColor == c;
-                                          return InkWell(
-                                            onTap: () {
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: [
+                                          ChoiceChip(
+                                            label: const Text('Transparent'),
+                                            selected:
+                                                _removeBgSolidColor == null,
+                                            onSelected: (_) {
                                               setState(() {
-                                                _removeBgSolidColor = c;
+                                                _removeBgSolidColor = null;
                                                 _previewBytes =
                                                     _removeBgOutputBytes();
                                                 _success = false;
                                                 _statusText = '';
                                               });
                                             },
-                                            child: Container(
-                                              width: 30,
-                                              height: 30,
-                                              decoration: BoxDecoration(
-                                                color: c,
-                                                shape: BoxShape.circle,
-                                                border: Border.all(
-                                                  color: selected
-                                                      ? const Color(0xFF1857E6)
-                                                      : const Color(0xFF94A3B8),
-                                                  width: selected ? 3 : 1.5,
+                                          ),
+                                          ..._removeBgPalette.map((c) {
+                                            final selected =
+                                                _removeBgSolidColor == c;
+                                            return InkWell(
+                                              onTap: () {
+                                                setState(() {
+                                                  _removeBgSolidColor = c;
+                                                  _previewBytes =
+                                                      _removeBgOutputBytes();
+                                                  _success = false;
+                                                  _statusText = '';
+                                                });
+                                              },
+                                              child: Container(
+                                                width: 30,
+                                                height: 30,
+                                                decoration: BoxDecoration(
+                                                  color: c,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                    color: selected
+                                                        ? const Color(
+                                                            0xFF1857E6)
+                                                        : const Color(
+                                                            0xFF94A3B8),
+                                                    width: selected ? 3 : 1.5,
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                          );
-                                        }),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                            if (widget.tool.id == 'remove-bg') ...[
-                              Container(
-                                width: double.infinity,
-                                margin: const EdgeInsets.only(bottom: 10),
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF8FAFC),
-                                  border: Border.all(
-                                      color: const Color(0xFFE2E8F0)),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Edge refine',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF0F172A),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Row(
-                                      children: [
-                                        const Text(
-                                          'Higher quality',
-                                          style: TextStyle(
-                                              fontWeight: FontWeight.w600),
-                                        ),
-                                        const Spacer(),
-                                        Switch(
-                                          value: _removeBgHighQuality,
-                                          onChanged: (v) {
-                                            setState(() {
-                                              _removeBgHighQuality = v;
-                                              _success = false;
-                                              _statusText = '';
-                                            });
-                                          },
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    const Text(
-                                      'Edge softness',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.w600),
-                                    ),
-                                    Slider(
-                                      value: _removeBgEdgeSoftness,
-                                      min: 0.0,
-                                      max: 1.0,
-                                      divisions: 20,
-                                      label: _removeBgEdgeSoftness
-                                          .toStringAsFixed(2),
-                                      onChanged: (v) {
-                                        setState(() {
-                                          _removeBgEdgeSoftness = v;
-                                          _success = false;
-                                          _statusText = '';
-                                        });
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                            _ImageToolControls(
-                              toolId: widget.tool.id,
-                              quality: _quality,
-                              lockAspectRatio: _lockAspectRatio,
-                              resizeWidth: _resizeWidth,
-                              resizeHeight: _resizeHeight,
-                              cropRatio: _cropRatio,
-                              convertFormat: _convertFormat,
-                              onQualityChanged: (v) {
-                                setState(() => _quality = v);
-                                _updatePreview();
-                              },
-                              onAspectLockChanged: (v) {
-                                setState(() {
-                                  _lockAspectRatio = v;
-                                  if (v && _decodedSource != null) {
-                                    final ratio = _decodedSource!.height /
-                                        _decodedSource!.width;
-                                    _resizeHeight =
-                                        (_resizeWidth * ratio).round();
-                                    _resizeHController.text =
-                                        _resizeHeight.toString();
-                                  }
-                                });
-                                _updatePreview();
-                              },
-                              resizeWidthController: _resizeWController,
-                              resizeHeightController: _resizeHController,
-                              onResizeWidthChanged: (v) {
-                                final value = int.tryParse(v.trim());
-                                if (value == null ||
-                                    value <= 0 ||
-                                    _decodedSource == null) {
-                                  return;
-                                }
-                                setState(() {
-                                  _resizeWidth = value;
-                                  if (_lockAspectRatio) {
-                                    final ratio = _decodedSource!.height /
-                                        _decodedSource!.width;
-                                    _resizeHeight =
-                                        (_resizeWidth * ratio).round();
-                                    _resizeHController.text =
-                                        _resizeHeight.toString();
-                                  }
-                                });
-                                _updatePreview();
-                              },
-                              onResizeHeightChanged: (v) {
-                                final value = int.tryParse(v.trim());
-                                if (value == null ||
-                                    value <= 0 ||
-                                    _decodedSource == null) {
-                                  return;
-                                }
-                                setState(() {
-                                  _resizeHeight = value;
-                                  if (_lockAspectRatio) {
-                                    final ratio = _decodedSource!.width /
-                                        _decodedSource!.height;
-                                    _resizeWidth =
-                                        (_resizeHeight * ratio).round();
-                                    _resizeWController.text =
-                                        _resizeWidth.toString();
-                                  }
-                                });
-                                _updatePreview();
-                              },
-                              onCropRatioChanged: (v) {
-                                setState(() => _cropRatio = v);
-                                _updatePreview();
-                              },
-                              onConvertFormatChanged: (v) {
-                                setState(() => _convertFormat = v);
-                                _updatePreview();
-                              },
-                              onCropAspectPreset: widget.tool.id == 'crop'
-                                  ? (aw, ah) => _fitCropAspect(aw, ah)
-                                  : null,
-                              onCropReset: widget.tool.id == 'crop'
-                                  ? () {
-                                      setState(() {
-                                        _cropL = 0;
-                                        _cropT = 0;
-                                        _cropR = 1;
-                                        _cropB = 1;
-                                      });
-                                      _updatePreview();
-                                    }
-                                  : null,
-                            ),
-                            const SizedBox(height: 12),
-                          ],
-                          if (_success)
-                            Column(
-                              children: [
-                                _SuccessPanel(
-                                  title: 'Done',
-                                  subtitle: _statusText.isEmpty
-                                      ? 'Processed image added to My Files.'
-                                      : _statusText,
-                                ),
-                                const SizedBox(height: 10),
-                                _PostJobActions(
-                                  filePath: _lastOutputPath,
-                                  onOpenMyFiles: () =>
-                                      Navigator.pushNamed(context, '/my-files'),
-                                ),
-                                if ((widget.tool.id == 'resize' ||
-                                        widget.tool.id == 'compress-img') &&
-                                    _statInputBytes != null &&
-                                    _statOutputBytes != null) ...[
-                                  const SizedBox(height: 10),
-                                  Container(
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.all(14),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF8FAFC),
-                                      borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(
-                                          color: const Color(0xFFE2E8F0)),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Before: $_statBeforeDims · ${_formatBytesStat(_statInputBytes!)}',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            color: Color(0xFF334155),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          'After:  $_statAfterDims · ${_formatBytesStat(_statOutputBytes!)}',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            color: Color(0xFF1857E6),
-                                          ),
-                                        ),
-                                        if (_statOutputBytes! <
-                                            _statInputBytes!) ...[
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            'File size reduced by ${((1 - _statOutputBytes! / _statInputBytes!) * 100).toStringAsFixed(1)}%',
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                              color: Color(0xFF0F766E),
-                                            ),
-                                          ),
+                                            );
+                                          }),
                                         ],
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                                if (widget.tool.id == 'remove-bg') ...[
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: OutlinedButton(
-                                          onPressed: () {
-                                            setState(() =>
-                                                _showOriginalPreview =
-                                                    !_showOriginalPreview);
-                                          },
-                                          style: OutlinedButton.styleFrom(
-                                            side: const BorderSide(
-                                                color: Color(0xFFCBD5E1)),
-                                            foregroundColor:
-                                                const Color(0xFF0F172A),
-                                            padding: const EdgeInsets.symmetric(
-                                                vertical: 12),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(14),
-                                            ),
-                                          ),
-                                          child: Text(
-                                            _showOriginalPreview
-                                                ? 'Show Removed'
-                                                : 'Show Original',
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w700),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: ElevatedButton(
-                                          onPressed: _lastOutputPath == null
-                                              ? null
-                                              : _downloadPngCopy,
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor:
-                                                const Color(0xFF1857E6),
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.symmetric(
-                                                vertical: 12),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(14),
-                                            ),
-                                          ),
-                                          child: const Text(
-                                            'Download PNG',
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.w700),
-                                          ),
-                                        ),
                                       ),
                                     ],
                                   ),
-                                ],
+                                ),
                               ],
-                            )
-                          else
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: (_decodedSource == null ||
-                                        _removeBgUnavailable)
-                                    ? null
-                                    : _start,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF1857E6),
-                                  foregroundColor: Colors.white,
-                                  disabledBackgroundColor:
-                                      const Color(0xFFBFD0F7),
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
+                              if (widget.tool.id == 'remove-bg') ...[
+                                Container(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF8FAFC),
+                                    border: Border.all(
+                                        color: const Color(0xFFE2E8F0)),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Edge refine',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF0F172A),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        children: [
+                                          const Text(
+                                            'Higher quality',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.w600),
+                                          ),
+                                          const Spacer(),
+                                          Switch(
+                                            value: _removeBgHighQuality,
+                                            onChanged: (v) {
+                                              setState(() {
+                                                _removeBgHighQuality = v;
+                                                _success = false;
+                                                _statusText = '';
+                                              });
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      const Text(
+                                        'Edge softness',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w600),
+                                      ),
+                                      Slider(
+                                        value: _removeBgEdgeSoftness,
+                                        min: 0.0,
+                                        max: 1.0,
+                                        divisions: 20,
+                                        label: _removeBgEdgeSoftness
+                                            .toStringAsFixed(2),
+                                        onChanged: (v) {
+                                          setState(() {
+                                            _removeBgEdgeSoftness = v;
+                                            _success = false;
+                                            _statusText = '';
+                                          });
+                                        },
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                child: Text(
-                                  _processButtonLabel,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.2,
+                              ],
+                              _ImageToolControls(
+                                toolId: widget.tool.id,
+                                quality: _quality,
+                                lockAspectRatio: _lockAspectRatio,
+                                resizeWidth: _resizeWidth,
+                                resizeHeight: _resizeHeight,
+                                cropRatio: _cropRatio,
+                                convertFormat: _convertFormat,
+                                onQualityChanged: (v) {
+                                  setState(() => _quality = v);
+                                  _updatePreview();
+                                },
+                                onAspectLockChanged: (v) {
+                                  setState(() {
+                                    _lockAspectRatio = v;
+                                    if (v && _decodedSource != null) {
+                                      final ratio = _decodedSource!.height /
+                                          _decodedSource!.width;
+                                      _resizeHeight =
+                                          (_resizeWidth * ratio).round();
+                                      _resizeHController.text =
+                                          _resizeHeight.toString();
+                                    }
+                                  });
+                                  _updatePreview();
+                                },
+                                resizeWidthController: _resizeWController,
+                                resizeHeightController: _resizeHController,
+                                onResizeWidthChanged: (v) {
+                                  final value = int.tryParse(v.trim());
+                                  if (value == null ||
+                                      value <= 0 ||
+                                      _decodedSource == null) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    _resizeWidth = value;
+                                    if (_lockAspectRatio) {
+                                      final ratio = _decodedSource!.height /
+                                          _decodedSource!.width;
+                                      _resizeHeight =
+                                          (_resizeWidth * ratio).round();
+                                      _resizeHController.text =
+                                          _resizeHeight.toString();
+                                    }
+                                  });
+                                  _updatePreview();
+                                },
+                                onResizeHeightChanged: (v) {
+                                  final value = int.tryParse(v.trim());
+                                  if (value == null ||
+                                      value <= 0 ||
+                                      _decodedSource == null) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    _resizeHeight = value;
+                                    if (_lockAspectRatio) {
+                                      final ratio = _decodedSource!.width /
+                                          _decodedSource!.height;
+                                      _resizeWidth =
+                                          (_resizeHeight * ratio).round();
+                                      _resizeWController.text =
+                                          _resizeWidth.toString();
+                                    }
+                                  });
+                                  _updatePreview();
+                                },
+                                onCropRatioChanged: (v) {
+                                  setState(() => _cropRatio = v);
+                                  _updatePreview();
+                                },
+                                onConvertFormatChanged: (v) {
+                                  setState(() => _convertFormat = v);
+                                  _updatePreview();
+                                },
+                                onCropAspectPreset: widget.tool.id == 'crop'
+                                    ? (aw, ah) => _fitCropAspect(aw, ah)
+                                    : null,
+                                onCropReset: widget.tool.id == 'crop'
+                                    ? () {
+                                        setState(() {
+                                          _cropL = 0;
+                                          _cropT = 0;
+                                          _cropR = 1;
+                                          _cropB = 1;
+                                        });
+                                        _updatePreview();
+                                      }
+                                    : null,
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            if (_success)
+                              Column(
+                                children: [
+                                  _SuccessPanel(
+                                    title: 'Done',
+                                    subtitle: _statusText.isEmpty
+                                        ? 'Processed image added to My Files.'
+                                        : _statusText,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _PostJobActions(
+                                    filePath: _lastOutputPath,
+                                    onOpenMyFiles: () => Navigator.pushNamed(
+                                        context, '/my-files'),
+                                  ),
+                                  if ((widget.tool.id == 'resize' ||
+                                          widget.tool.id == 'compress-img') &&
+                                      _statInputBytes != null &&
+                                      _statOutputBytes != null) ...[
+                                    const SizedBox(height: 10),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(14),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF8FAFC),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                            color: const Color(0xFFE2E8F0)),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Before: $_statBeforeDims · ${_formatBytesStat(_statInputBytes!)}',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF334155),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            'After:  $_statAfterDims · ${_formatBytesStat(_statOutputBytes!)}',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF1857E6),
+                                            ),
+                                          ),
+                                          if (_statOutputBytes! <
+                                              _statInputBytes!) ...[
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              'File size reduced by ${((1 - _statOutputBytes! / _statInputBytes!) * 100).toStringAsFixed(1)}%',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                color: Color(0xFF0F766E),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                  if (widget.tool.id == 'remove-bg') ...[
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: OutlinedButton(
+                                            onPressed: () {
+                                              setState(() =>
+                                                  _showOriginalPreview =
+                                                      !_showOriginalPreview);
+                                            },
+                                            style: OutlinedButton.styleFrom(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 12),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(14),
+                                              ),
+                                            ).merge(
+                                              Theme.of(context)
+                                                  .outlinedButtonTheme
+                                                  .style,
+                                            ),
+                                            child: Text(
+                                              _showOriginalPreview
+                                                  ? 'Show Removed'
+                                                  : 'Show Original',
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.w700),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: ElevatedButton(
+                                            onPressed: _lastOutputPath == null
+                                                ? null
+                                                : _downloadPngCopy,
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor:
+                                                  const Color(0xFF1857E6),
+                                              foregroundColor: Colors.white,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 12),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(14),
+                                              ),
+                                            ),
+                                            child: const Text(
+                                              'Download PNG',
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.w700),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              )
+                            else
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: (_decodedSource == null ||
+                                          _removeBgUnavailable)
+                                      ? null
+                                      : _start,
+                                  style: ElevatedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 16),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ).merge(
+                                    Theme.of(context).elevatedButtonTheme.style,
+                                  ),
+                                  child: Text(
+                                    _processButtonLabel,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.2,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                        ],
-                      ),
+                          ],
                     ),
-                  ),
-                  if (_processing)
-                    _ProcessingOverlay(
-                        message: '${widget.tool.name}...', progress: _progress),
-                ],
+                    if (_processing)
+                      _ProcessingOverlay(
+                          message: '${widget.tool.name}...',
+                          progress: _progress),
+                  ],
+                ),
               ),
             ),
           ],
@@ -2057,6 +2023,7 @@ class _ImageToolControls extends StatelessWidget {
           SwitchListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
+            tileColor: Colors.transparent,
             title: const Text(
               'Lock aspect ratio',
               style: TextStyle(fontWeight: FontWeight.w600),
@@ -2192,10 +2159,8 @@ class _ImageToolControls extends StatelessWidget {
 
 class PdfProcessingScreen extends StatefulWidget {
   final ToolOption tool;
-  final String apiKey;
 
-  const PdfProcessingScreen(
-      {super.key, required this.tool, required this.apiKey});
+  const PdfProcessingScreen({super.key, required this.tool});
 
   @override
   State<PdfProcessingScreen> createState() => _PdfProcessingScreenState();
@@ -2207,6 +2172,7 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
 
   /// Path on disk used by in-app PDF viewer.
   String? _pdfPathForOpen;
+  bool _pdfPathForOpenExists = false;
   bool _processing = false;
   bool _success = false;
   int _progress = 0;
@@ -2294,8 +2260,10 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
       if (firstBytes != null && !isOcr) {
         pages = _pdfService.pageCount(firstBytes);
       }
-    } catch (_) {
+    } catch (e) {
       pages = 0;
+      AnalyticsService.logEvent('pdf_pagecount_fail',
+          props: {'tool_id': widget.tool.id, 'msg': e.toString()});
     }
 
     final fileForPath = isMerge ? result.files.last : result.files.first;
@@ -2310,6 +2278,9 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
           ..add(result.files.first);
       }
       _pdfPathForOpen = diskPath;
+      _pdfPathForOpenExists = diskPath != null &&
+          diskPath.isNotEmpty &&
+          File(diskPath).existsSync();
       _success = false;
       _ocrText = '';
       _ocrSearchController.clear();
@@ -2697,7 +2668,7 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
           if (b != null) all.add(b);
         }
         if (all.isEmpty) throw Exception('No file bytes');
-        outputBytes = _pdfService.merge(all);
+        outputBytes = await PdfToolsIsolate.merge(all);
       } else {
         final src = await _readFileBytes(_files.first);
         if (src == null) throw Exception('No file bytes');
@@ -2705,19 +2676,19 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
         final pageCount = _pdfService.pageCount(src);
         switch (widget.tool.id) {
           case 'split':
-            outputBytes = _pdfService.splitExtract(
+            outputBytes = await PdfToolsIsolate.splitExtract(
               src,
               _parsePageSet(_rangeController.text, pageCount),
             );
             break;
           case 'delete':
-            outputBytes = _pdfService.deletePages(
+            outputBytes = await PdfToolsIsolate.deletePages(
               src,
               _parsePageSet(_rangeController.text, pageCount),
             );
             break;
           case 'rearrange':
-            outputBytes = _pdfService.rearrange(
+            outputBytes = await PdfToolsIsolate.rearrange(
               src,
               _parseOrder(_orderController.text, pageCount),
             );
@@ -2726,17 +2697,18 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
             final selectedPages =
                 _parsePageSet(_rangeController.text, pageCount);
             outputBytes = selectedPages.length == pageCount
-                ? _pdfService.rotateAll(src, _rotation)
-                : _pdfService.rotateSelected(src, _rotation, selectedPages);
+                ? await PdfToolsIsolate.rotateAll(src, _rotation)
+                : await PdfToolsIsolate.rotateSelected(
+                    src, _rotation, selectedPages);
             break;
           case 'compress-pdf':
-            outputBytes = _pdfService.compress(src, _compression);
+            outputBytes = await PdfToolsIsolate.compress(src, _compression);
             break;
           case 'password':
             if (_passwordController.text.trim().isEmpty) {
               throw Exception('Password is required');
             }
-            outputBytes = _pdfService.passwordProtect(
+            outputBytes = await PdfToolsIsolate.passwordProtect(
                 src, _passwordController.text.trim());
             break;
           default:
@@ -2799,57 +2771,45 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
 
   Future<void> _saveOcrAsPdf() async {
     if (_ocrText.trim().isEmpty) return;
-    final textDoc = PdfDocument();
-    try {
-      final page = textDoc.pages.add();
-      final font = PdfStandardFont(PdfFontFamily.helvetica, 11);
-      page.graphics.drawString(
-        _ocrText,
-        font,
-        bounds: Rect.fromLTWH(0, 0, page.size.width, page.size.height),
-      );
-      final textBytes = Uint8List.fromList(textDoc.saveSync());
+    final textBytes = await PdfToolsIsolate.textPdf(_ocrText);
 
-      Uint8List outputBytes = textBytes;
-      final first = _files.isNotEmpty ? _files.first : null;
-      final firstExt = (first?.extension ?? '').toLowerCase();
-      // For OCR on PDFs, keep original pages and append copyable OCR text pages.
-      final firstBytes = first == null ? null : await _readFileBytes(first);
-      if (first != null && firstExt == 'pdf' && firstBytes != null) {
-        outputBytes = _pdfService.merge([firstBytes, textBytes]);
-      }
-
-      final path = await _savePdfOutput(outputBytes, 'ocr_text');
-      FileStore.addFile(
-        FileItem(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          name: path.split('/').last,
-          type: FileType.pdf,
-          date: 'Just now',
-          path: path,
-        ),
-      );
-      if (!mounted) return;
-      setState(() {
-        _lastOutputPath = path;
-        _success = true;
-        _statusText = (first != null && firstExt == 'pdf')
-            ? 'Original PDF + OCR text PDF saved'
-            : 'OCR text PDF saved to My Files';
-      });
-      UiSafety.showSnackBar(
-        context,
-        SnackBar(
-          content: Text(
-            (first != null && firstExt == 'pdf')
-                ? 'Saved hybrid PDF (original + copyable OCR text)'
-                : 'OCR text PDF saved',
-          ),
-        ),
-      );
-    } finally {
-      textDoc.dispose();
+    Uint8List outputBytes = textBytes;
+    final first = _files.isNotEmpty ? _files.first : null;
+    final firstExt = (first?.extension ?? '').toLowerCase();
+    // For OCR on PDFs, keep original pages and append copyable OCR text pages.
+    final firstBytes = first == null ? null : await _readFileBytes(first);
+    if (first != null && firstExt == 'pdf' && firstBytes != null) {
+      outputBytes = await PdfToolsIsolate.merge([firstBytes, textBytes]);
     }
+
+    final path = await _savePdfOutput(outputBytes, 'ocr_text');
+    FileStore.addFile(
+      FileItem(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: path.split('/').last,
+        type: FileType.pdf,
+        date: 'Just now',
+        path: path,
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      _lastOutputPath = path;
+      _success = true;
+      _statusText = (first != null && firstExt == 'pdf')
+          ? 'Original PDF + OCR text PDF saved'
+          : 'OCR text PDF saved to My Files';
+    });
+    UiSafety.showSnackBar(
+      context,
+      SnackBar(
+        content: Text(
+          (first != null && firstExt == 'pdf')
+              ? 'Saved hybrid PDF (original + copyable OCR text)'
+              : 'OCR text PDF saved',
+        ),
+      ),
+    );
   }
 
   @override
@@ -2864,26 +2824,34 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.tool.name)),
-      body: SafeArea(
-        top: false,
-        child: Column(
+    final theme = Theme.of(context);
+    final bottomPad = edgeToEdgeBottomPadding(context);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlayForTheme(theme),
+      child: Scaffold(
+        backgroundColor: theme.scaffoldBackgroundColor,
+        resizeToAvoidBottomInset: true,
+        appBar: AppBar(
+          backgroundColor: theme.scaffoldBackgroundColor,
+          surfaceTintColor: theme.scaffoldBackgroundColor,
+          title: Text(widget.tool.name),
+        ),
+        body: Column(
           children: [
             const SizedBox(height: 8),
             const InlineBannerAd(),
             const SizedBox(height: 8),
             Expanded(
-              child: Stack(
-                children: [
-                  ListView(
-                    padding: EdgeInsets.fromLTRB(
-                      16,
-                      16,
-                      16,
-                      16 + MediaQuery.of(context).padding.bottom,
-                    ),
-                    children: [
+              child: ColoredBox(
+                color: theme.scaffoldBackgroundColor,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ListView(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, bottomPad),
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      children: [
                       if (_errorCode != null) ...[
                         _ErrorBanner(
                           code: _errorCode!,
@@ -2951,7 +2919,7 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(14),
                             child: (_pdfPathForOpen != null &&
-                                    File(_pdfPathForOpen!).existsSync())
+                                    _pdfPathForOpenExists)
                                 ? SfPdfViewer.file(
                                     File(_pdfPathForOpen!),
                                     interactionMode: PdfInteractionMode.pan,
@@ -3236,9 +3204,10 @@ class _PdfProcessingScreenState extends State<PdfProcessingScreen> {
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    ),
     );
   }
 }
@@ -3282,8 +3251,13 @@ class MyFilesScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Scaffold(
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bottomPad = edgeToEdgeBottomPadding(context);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlayForTheme(theme),
+      child: Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('My Files')),
       body: Column(
         children: [
@@ -3291,14 +3265,21 @@ class MyFilesScreen extends StatelessWidget {
           const InlineBannerAd(),
           const SizedBox(height: 8),
           Expanded(
-            child: ValueListenableBuilder<List<FileItem>>(
+            child: ColoredBox(
+              color: theme.scaffoldBackgroundColor,
+              child: ValueListenableBuilder<List<FileItem>>(
               valueListenable: FileStore.files,
               builder: (context, files, _) {
                 if (files.isEmpty) {
-                  return const Center(child: Text('No generated files yet.'));
+                  return Padding(
+                    padding: EdgeInsets.fromLTRB(20, 0, 20, bottomPad),
+                    child: const Center(
+                      child: Text('No generated files yet.'),
+                    ),
+                  );
                 }
                 return ListView.separated(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
                   itemCount: files.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, index) {
@@ -3318,8 +3299,7 @@ class MyFilesScreen extends StatelessWidget {
                           child: Row(
                             children: [
                               if (file.thumbnailPath != null &&
-                                  file.thumbnailPath!.isNotEmpty &&
-                                  File(file.thumbnailPath!).existsSync())
+                                  file.thumbnailPath!.isNotEmpty)
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
                                   child: Image.file(
@@ -3538,8 +3518,10 @@ class MyFilesScreen extends StatelessWidget {
                 );
               },
             ),
+            ),
           ),
         ],
+      ),
       ),
     );
   }

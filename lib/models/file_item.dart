@@ -20,22 +20,22 @@ class FileItem {
   });
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'type': type.name,
-    'date': date,
-    'content': content,
-    'path': path,
-    'thumbnailPath': thumbnailPath,
-  };
+        'id': id,
+        'name': name,
+        'type': type.name,
+        'date': date,
+        'content': content,
+        'path': path,
+        'thumbnailPath': thumbnailPath,
+      };
 
   factory FileItem.fromJson(Map<String, dynamic> json) => FileItem(
-    id: json['id'],
-    name: json['name'],
-    type: FileType.values.byName(json['type']),
-    date: json['date'],
-    content: json['content'],
-    path: json['path'],
-    thumbnailPath: json['thumbnailPath'],
-  );
+        id: json['id'],
+        name: json['name'],
+        type: FileType.values.byName(json['type']),
+        date: json['date'],
+        content: json['content'],
+        path: json['path'],
+        thumbnailPath: json['thumbnailPath'],
+      );
 }

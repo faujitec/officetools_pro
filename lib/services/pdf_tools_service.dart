@@ -86,7 +86,8 @@ class PdfToolsService {
     }
   }
 
-  Uint8List rotateSelected(Uint8List input, PdfPageRotateAngle angle, Set<int> pagesToRotate) {
+  Uint8List rotateSelected(
+      Uint8List input, PdfPageRotateAngle angle, Set<int> pagesToRotate) {
     final doc = PdfDocument(inputBytes: input);
     try {
       for (int i = 0; i < doc.pages.count; i++) {

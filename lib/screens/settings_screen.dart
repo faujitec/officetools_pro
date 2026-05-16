@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:office_toolspro/services/app_settings.dart';
+import 'package:office_toolspro/services/consent_service.dart';
+import 'package:office_toolspro/utils/scroll_insets.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -7,15 +9,25 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final bottomPad = edgeToEdgeBottomPadding(context);
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Settings')),
-      body: ValueListenableBuilder<AppSettingsState>(
+      body: ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: ValueListenableBuilder<AppSettingsState>(
         valueListenable: AppSettings.state,
         builder: (context, settings, _) {
           return ListView(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, 16 + bottomInset),
+            padding: EdgeInsets.fromLTRB(16, 8, 16, bottomPad),
             children: [
+              Text(
+                'Scan Doc',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+              ),
               SwitchListTile(
                 value: settings.autoDetectScanEdges,
                 onChanged: (v) => AppSettings.update(
@@ -48,23 +60,6 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              SwitchListTile(
-                value: settings.cloudFeaturesEnabled,
-                onChanged: (v) => AppSettings.update(
-                    settings.copyWith(cloudFeaturesEnabled: v)),
-                title: const Text('Enable cloud conversion features'),
-                subtitle: Text(
-                  'Controls CloudConvert-based tools (PDF/Word/Excel conversion).',
-                  style: TextStyle(
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12.5,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
               Text(
                 'Default image quality: ${settings.defaultImageQuality}%',
                 style: TextStyle(
@@ -81,9 +76,39 @@ class SettingsScreen extends StatelessWidget {
                   settings.copyWith(defaultImageQuality: v.round()),
                 ),
               ),
+              const SizedBox(height: 16),
+              ValueListenableBuilder<bool>(
+                valueListenable: ConsentService.privacyOptionsRequired,
+                builder: (context, required, _) {
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Privacy options'),
+                    subtitle: Text(
+                      required
+                          ? 'Manage advertising privacy options.'
+                          : 'No privacy options required right now.',
+                      style: TextStyle(
+                        color: isDark
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF64748B),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    enabled: required,
+                    onTap: required
+                        ? () async {
+                            await ConsentService.showPrivacyOptions();
+                          }
+                        : null,
+                  );
+                },
+              ),
             ],
           );
         },
+      ),
       ),
     );
   }

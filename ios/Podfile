@@ -23,6 +23,7 @@ def flutter_root
 end
 
 require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+require File.expand_path('scripts/apple_silicon_simulator', __dir__)
 
 flutter_ios_podfile_setup
 
@@ -45,4 +46,6 @@ post_install do |installer|
         `uname -m`.strip == 'arm64' ? 'i386' : 'i386 arm64'
     end
   end
+
+  mlkit_apple_silicon_simulator_patch(installer)
 end

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -6,49 +7,57 @@ import 'package:shared_preferences/shared_preferences.dart';
 class AppSettingsState {
   final bool autoDetectScanEdges;
   final bool keepOriginalScanCopy;
-  final bool cloudFeaturesEnabled;
   final int defaultImageQuality;
   final Set<String> dismissedTips;
+
+  /// One of: `light`, `dark`, `system`.
+  final String themePreference;
 
   const AppSettingsState({
     required this.autoDetectScanEdges,
     required this.keepOriginalScanCopy,
-    required this.cloudFeaturesEnabled,
     required this.defaultImageQuality,
     required this.dismissedTips,
+    required this.themePreference,
   });
 
   factory AppSettingsState.defaults() => const AppSettingsState(
         autoDetectScanEdges: true,
         keepOriginalScanCopy: false,
-        cloudFeaturesEnabled: true,
         defaultImageQuality: 80,
         dismissedTips: <String>{},
+        themePreference: 'light',
       );
 
   AppSettingsState copyWith({
     bool? autoDetectScanEdges,
     bool? keepOriginalScanCopy,
-    bool? cloudFeaturesEnabled,
     int? defaultImageQuality,
     Set<String>? dismissedTips,
+    String? themePreference,
   }) {
     return AppSettingsState(
       autoDetectScanEdges: autoDetectScanEdges ?? this.autoDetectScanEdges,
       keepOriginalScanCopy: keepOriginalScanCopy ?? this.keepOriginalScanCopy,
-      cloudFeaturesEnabled: cloudFeaturesEnabled ?? this.cloudFeaturesEnabled,
       defaultImageQuality: defaultImageQuality ?? this.defaultImageQuality,
       dismissedTips: dismissedTips ?? this.dismissedTips,
+      themePreference: themePreference ?? this.themePreference,
     );
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'autoDetectScanEdges': autoDetectScanEdges,
         'keepOriginalScanCopy': keepOriginalScanCopy,
-        'cloudFeaturesEnabled': cloudFeaturesEnabled,
         'defaultImageQuality': defaultImageQuality,
         'dismissedTips': dismissedTips.toList(growable: false),
+        'themePreference': themePreference,
       };
+
+  static String _normalizeTheme(String? raw) {
+    final v = (raw ?? 'light').trim().toLowerCase();
+    if (v == 'dark' || v == 'system' || v == 'light') return v;
+    return 'light';
+  }
 
   factory AppSettingsState.fromJson(Map<String, dynamic> json) {
     final tips =
@@ -58,9 +67,9 @@ class AppSettingsState {
     return AppSettingsState(
       autoDetectScanEdges: json['autoDetectScanEdges'] as bool? ?? true,
       keepOriginalScanCopy: json['keepOriginalScanCopy'] as bool? ?? false,
-      cloudFeaturesEnabled: json['cloudFeaturesEnabled'] as bool? ?? true,
       defaultImageQuality: quality.clamp(50, 100),
       dismissedTips: tips,
+      themePreference: _normalizeTheme(json['themePreference'] as String?),
     );
   }
 }
@@ -71,6 +80,9 @@ class AppSettings {
   static const _prefsKey = 'app_settings_v1';
   static final ValueNotifier<AppSettingsState> state =
       ValueNotifier<AppSettingsState>(AppSettingsState.defaults());
+
+  static Timer? _saveDebounceTimer;
+  static const Duration _saveDebounce = Duration(milliseconds: 450);
 
   static Future<void> load() async {
     try {
@@ -90,13 +102,18 @@ class AppSettings {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefsKey, jsonEncode(state.value.toJson()));
     } catch (_) {
-      // Non-fatal.
+      // Storage full or prefs unavailable — non-fatal.
     }
   }
 
+  /// Updates in-memory settings immediately; persists after a short debounce.
   static void update(AppSettingsState next) {
     state.value = next;
-    _save();
+    _saveDebounceTimer?.cancel();
+    _saveDebounceTimer = Timer(_saveDebounce, () {
+      _save();
+      _saveDebounceTimer = null;
+    });
   }
 
   static void dismissTip(String tipId) {

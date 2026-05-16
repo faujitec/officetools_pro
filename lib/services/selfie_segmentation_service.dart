@@ -54,7 +54,9 @@ class SelfieSegmentationService {
       await segmenter.close();
       try {
         await tempFile.delete();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[remove-bg] temp delete failed: $e');
+      }
     }
   }
 

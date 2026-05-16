@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:office_toolspro/constants.dart';
 import 'package:office_toolspro/screens/calculators_screen.dart';
@@ -9,55 +8,107 @@ import 'package:office_toolspro/screens/scanner_screen.dart';
 import 'package:office_toolspro/screens/settings_screen.dart';
 import 'package:office_toolspro/screens/tool_flows_screen.dart';
 import 'package:office_toolspro/services/app_settings.dart';
+import 'package:office_toolspro/services/consent_service.dart';
 import 'package:office_toolspro/services/file_store.dart';
-
-class ThemeController {
-  ThemeController._();
-  static final ValueNotifier<ThemeMode> mode =
-      ValueNotifier<ThemeMode>(ThemeMode.light);
-}
+import 'package:office_toolspro/services/interstitial_ad_service.dart';
+import 'package:office_toolspro/theme_controller.dart';
+import 'package:office_toolspro/utils/system_ui.dart';
+import 'package:office_toolspro/widgets/ads_click_tracker.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await MobileAds.instance.initialize();
-  try {
-    await dotenv.load(fileName: '.env');
-  } catch (_) {
-    // Optional local env file.
-  }
   await FileStore.load();
   await AppSettings.load();
+  ThemeController.applyPreference(AppSettings.state.value.themePreference);
+  await ConsentService.gatherConsent();
+  await MobileAds.instance.initialize();
+  InterstitialAdService.instance.initialize();
   runApp(const OfficeToolsApp());
 }
 
-class OfficeToolsApp extends StatelessWidget {
+class OfficeToolsApp extends StatefulWidget {
   const OfficeToolsApp({super.key});
-  static String _envOrDefine(String name) {
-    final fromDefine = String.fromEnvironment(name);
-    if (fromDefine.isNotEmpty) return fromDefine;
-    return dotenv.env[name] ?? '';
+
+  @override
+  State<OfficeToolsApp> createState() => _OfficeToolsAppState();
+}
+
+class _OfficeToolsAppState extends State<OfficeToolsApp>
+    with WidgetsBindingObserver {
+  static Color? _cachedDarkSurface;
+
+  @override
+  void initState() {
+    super.initState();
+    enableEdgeToEdgeUi();
+    WidgetsBinding.instance.addObserver(this);
+    ThemeController.mode.addListener(_syncSystemNavigationBar);
+    _syncSystemNavigationBar();
   }
 
-  static final String _geminiApiKey = _envOrDefine('GEMINI_API_KEY');
-  static final String _cloudConvertApiKey =
-      _envOrDefine('CLOUDCONVERT_API_KEY');
+  @override
+  void dispose() {
+    InterstitialAdService.instance.dispose();
+    ThemeController.mode.removeListener(_syncSystemNavigationBar);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    _syncSystemNavigationBar();
+  }
+
+  void _syncSystemNavigationBar() {
+    final mode = ThemeController.mode.value;
+    final platform =
+        WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    final useDark = switch (mode) {
+      ThemeMode.dark => true,
+      ThemeMode.light => false,
+      ThemeMode.system => platform == Brightness.dark,
+    };
+    _cachedDarkSurface ??= ColorScheme.fromSeed(
+      seedColor: AppConstants.primaryBlue,
+      brightness: Brightness.dark,
+    ).surface;
+    SystemChrome.setSystemUIOverlayStyle(
+      overlayForBrightness(useDark ? Brightness.dark : Brightness.light),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeController.mode,
       builder: (context, mode, _) {
+        final lightScheme = ColorScheme.fromSeed(
+          seedColor: AppConstants.primaryBlue,
+          surface: AppConstants.backgroundGrey,
+        );
+        final darkScheme = ColorScheme.fromSeed(
+          seedColor: AppConstants.primaryBlue,
+          brightness: Brightness.dark,
+        );
         return MaterialApp(
           title: 'OfficeTools Pro',
           debugShowCheckedModeBanner: false,
           themeMode: mode,
+          builder: (context, child) {
+            return AdsClickTracker(
+              child: AnnotatedRegion<SystemUiOverlayStyle>(
+                value: overlayForTheme(Theme.of(context)),
+                child: child ?? const SizedBox.shrink(),
+              ),
+            );
+          },
           theme: ThemeData(
             useMaterial3: true,
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: AppConstants.primaryBlue,
-              surface: AppConstants.backgroundGrey,
-            ),
-            textTheme: GoogleFonts.interTextTheme(),
+            colorScheme: lightScheme,
+            textTheme: ThemeData(
+              useMaterial3: true,
+              colorScheme: lightScheme,
+            ).textTheme,
             scaffoldBackgroundColor: AppConstants.backgroundGrey,
             appBarTheme: const AppBarTheme(
               backgroundColor: Color(0xFFFFFFFF),
@@ -114,6 +165,8 @@ class OfficeToolsApp extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1857E6),
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: const Color(0xFFBFD0F7),
+                disabledForegroundColor: const Color(0xFF475569),
                 minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
@@ -151,13 +204,13 @@ class OfficeToolsApp extends StatelessWidget {
           darkTheme: ThemeData(
             useMaterial3: true,
             brightness: Brightness.dark,
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: AppConstants.primaryBlue,
+            colorScheme: darkScheme,
+            scaffoldBackgroundColor: darkScheme.surface,
+            textTheme: ThemeData(
+              useMaterial3: true,
+              colorScheme: darkScheme,
               brightness: Brightness.dark,
-            ),
-            textTheme: GoogleFonts.interTextTheme(
-              ThemeData(brightness: Brightness.dark).textTheme,
-            ),
+            ).textTheme,
             inputDecorationTheme: InputDecorationTheme(
               filled: true,
               fillColor: const Color(0xFF1E293B),
@@ -192,8 +245,10 @@ class OfficeToolsApp extends StatelessWidget {
             ),
             elevatedButtonTheme: ElevatedButtonThemeData(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1857E6),
+                backgroundColor: const Color(0xFF3B82F6),
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: const Color(0xFF334155),
+                disabledForegroundColor: const Color(0xFFE2E8F0),
                 minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
@@ -202,6 +257,7 @@ class OfficeToolsApp extends StatelessWidget {
             ),
             outlinedButtonTheme: OutlinedButtonThemeData(
               style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFE2E8F0),
                 minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
@@ -230,11 +286,10 @@ class OfficeToolsApp extends StatelessWidget {
           ),
           home: const HomeScreen(),
           routes: {
-            '/scanner': (context) => ScannerScreen(apiKey: _geminiApiKey),
+            '/scanner': (context) => const ScannerScreen(),
             '/image-tools': (context) => const ImageToolsScreen(),
-            '/pdf-tools': (context) => PdfToolsScreen(apiKey: _geminiApiKey),
-            '/convert': (context) =>
-                ConvertScreen(cloudConvertApiKey: _cloudConvertApiKey),
+            '/pdf-tools': (context) => const PdfToolsScreen(),
+            '/convert': (context) => const ConvertScreen(),
             '/calculators': (context) => const CalculatorsScreen(),
             '/my-files': (context) => const MyFilesScreen(),
             '/settings': (context) => const SettingsScreen(),

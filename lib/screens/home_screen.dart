@@ -1,14 +1,19 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:office_toolspro/constants.dart';
-import 'package:office_toolspro/main.dart';
 import 'package:office_toolspro/models/file_item.dart';
 import 'package:office_toolspro/services/app_settings.dart';
 import 'package:office_toolspro/services/file_store.dart';
+import 'package:office_toolspro/theme_controller.dart';
+import 'package:office_toolspro/utils/scroll_insets.dart';
 import 'package:office_toolspro/utils/ui_safety.dart';
 import 'package:office_toolspro/widgets/context_hint_card.dart';
 import 'package:office_toolspro/widgets/global_banner_ad.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,39 +23,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final ScrollController _scrollController = ScrollController();
-  bool _showTopBanner = true;
-  static const double _switchDownOffset = 260;
-  static const double _switchUpOffset = 160;
-
-  @override
-  void initState() {
-    super.initState();
-    _scrollController.addListener(_onScroll);
-  }
-
-  void _onScroll() {
-    final offset = _scrollController.offset;
-    // Hysteresis to prevent flicker while user hovers near threshold.
-    final nextShowTop =
-        _showTopBanner ? offset < _switchDownOffset : offset <= _switchUpOffset;
-    if (nextShowTop != _showTopBanner) {
-      setState(() => _showTopBanner = nextShowTop);
-    }
-  }
-
-  @override
-  void dispose() {
-    _scrollController
-      ..removeListener(_onScroll)
-      ..dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final bottomPad = edgeToEdgeBottomPadding(context, extra: 24);
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       drawer: const _AppDrawer(),
@@ -84,24 +60,15 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
-      body: SingleChildScrollView(
-        controller: _scrollController,
-        padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottomInset),
+      body: ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(20, 12, 20, bottomPad),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              child: _showTopBanner
-                  ? const Column(
-                      key: ValueKey('top-banner'),
-                      children: [
-                        InlineBannerAd(),
-                        SizedBox(height: 12),
-                      ],
-                    )
-                  : const SizedBox.shrink(key: ValueKey('top-banner-hidden')),
-            ),
+            const InlineBannerAd(),
+            const SizedBox(height: 12),
             if (AppSettings.shouldShowTip('home.quickstart')) ...[
               ContextHintCard(
                 title: 'Quick start',
@@ -129,24 +96,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 return ToolCard(tool: tool);
               },
             ),
-            const SizedBox(height: 10),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              child: !_showTopBanner
-                  ? const Column(
-                      key: ValueKey('mid-banner'),
-                      children: [
-                        InlineBannerAd(),
-                        SizedBox(height: 10),
-                      ],
-                    )
-                  : const SizedBox.shrink(key: ValueKey('mid-banner-hidden')),
-            ),
+            const SizedBox(height: 16),
+            const InlineBannerAd(),
+            const SizedBox(height: 12),
             _RecentFilesSection(
               onOpenAll: () => Navigator.pushNamed(context, '/my-files'),
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -508,6 +466,27 @@ class _RecentFileMenuRow extends StatelessWidget {
   }
 }
 
+Future<void> _openLegalPage(
+  BuildContext context, {
+  required Uri uri,
+  required String pageName,
+}) async {
+  Navigator.of(context).pop();
+  final ok = await launchUrl(
+    uri,
+    mode: LaunchMode.externalApplication,
+  );
+  if (!context.mounted) return;
+  if (!ok) {
+    UiSafety.showSnackBar(
+      context,
+      SnackBar(
+        content: Text('Could not open $pageName. Check your connection.'),
+      ),
+    );
+  }
+}
+
 class _AppDrawer extends StatelessWidget {
   const _AppDrawer();
 
@@ -523,7 +502,12 @@ class _AppDrawer extends StatelessWidget {
       ),
       child: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+          padding: EdgeInsets.fromLTRB(
+            12,
+            10,
+            12,
+            14 + scrollBottomInsetUnderSafeArea(context),
+          ),
           children: [
             const SizedBox(height: 4),
             _DrawerActionTile(
@@ -587,8 +571,14 @@ class _AppDrawer extends StatelessWidget {
                     ),
                     value: isDarkMode,
                     onChanged: (enabled) {
-                      ThemeController.mode.value =
-                          enabled ? ThemeMode.dark : ThemeMode.light;
+                      final mode = enabled ? ThemeMode.dark : ThemeMode.light;
+                      ThemeController.mode.value = mode;
+                      AppSettings.update(
+                        AppSettings.state.value.copyWith(
+                          themePreference:
+                              ThemeController.preferenceFromMode(mode),
+                        ),
+                      );
                     },
                   ),
                 );
@@ -598,85 +588,43 @@ class _AppDrawer extends StatelessWidget {
             _DrawerActionTile(
               icon: Icons.privacy_tip_outlined,
               label: 'Privacy Policy',
-              onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const _InfoPage(
-                      title: 'Privacy Policy',
-                      content: 'Privacy Policy (Last updated: 06 May 2026)\n\n'
-                          'OfficeTools Pro is designed as a utility-first app. We process files that you choose and only for the operations you trigger.\n\n'
-                          '1) Scope of data processing\n'
-                          '- The app can process PDFs, images, text, and office files selected by you.\n'
-                          '- Most features (merge/split/rearrange PDFs, image resize/crop/compress, calculator tools) run locally on your device.\n'
-                          '- Some optional features may call third-party services when enabled (for example CloudConvert-based conversions).\n\n'
-                          '2) What is stored on device\n'
-                          '- Generated outputs are stored locally in the app output folder.\n'
-                          '- Recent/My Files history is stored locally to help you reopen files quickly.\n'
-                          '- App preferences (theme, settings toggles) are stored locally.\n'
-                          '- We do not maintain a user account system in the app.\n\n'
-                          '3) Cloud features and third-party providers\n'
-                          '- Cloud conversion features are optional and can be disabled in Settings.\n'
-                          '- If enabled, selected file content may be transmitted to the configured provider to complete conversion.\n'
-                          '- Provider behavior, retention, and compliance are governed by that provider\'s policy.\n'
-                          '- Avoid sending highly sensitive documents to cloud providers unless your organization approves it.\n\n'
-                          '4) File ownership and responsibility\n'
-                          '- You retain ownership of your files and outputs.\n'
-                          '- You are responsible for rights/permissions to process shared or third-party documents.\n\n'
-                          '5) Security notes\n'
-                          '- We aim to keep local data handling simple and minimal.\n'
-                          '- No system is 100% risk-free; keep backups for important files.\n'
-                          '- Use device lock and platform security features for stronger protection.\n\n'
-                          '6) Your controls\n'
-                          '- Remove file entries from My Files anytime.\n'
-                          '- Disable cloud features in Settings.\n'
-                          '- Use local-only tools where privacy is critical.\n\n'
-                          '7) Contact\n'
-                          'For privacy questions or data-handling concerns: faujitec@gmail.com',
-                    ),
-                  ),
-                );
-              },
+              onTap: () => _openLegalPage(
+                context,
+                uri: AppConstants.privacyPolicyUri,
+                pageName: 'Privacy Policy',
+              ),
             ),
             _DrawerActionTile(
               icon: Icons.description_outlined,
-              label: 'Terms of Reference',
-              onTap: () {
+              label: 'Terms of Service',
+              onTap: () => _openLegalPage(
+                context,
+                uri: AppConstants.termsOfServiceUri,
+                pageName: 'Terms of Service',
+              ),
+            ),
+            _DrawerActionTile(
+              icon: Icons.star_rate_rounded,
+              label: 'Rate the app',
+              onTap: () async {
                 Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const _InfoPage(
-                      title: 'Terms of Reference',
-                      content:
-                          'Terms of Reference (Last updated: 06 May 2026)\n\n'
-                          'By using OfficeTools Pro, you agree to the following:\n\n'
-                          '1) Acceptable use\n'
-                          '- Use the app only for lawful purposes.\n'
-                          '- Process only files you own or are authorized to use.\n'
-                          '- Do not use the app to violate privacy, IP, or regulatory obligations.\n\n'
-                          '2) Accuracy and verification\n'
-                          '- The app provides utility operations and best-effort processing.\n'
-                          '- You must review outputs before legal, financial, compliance, or production submission.\n'
-                          '- OCR, conversion, and compression may vary by source quality and file structure.\n\n'
-                          '3) Third-party services\n'
-                          '- Some features depend on third-party APIs and internet access.\n'
-                          '- You are responsible for API keys, billing, usage limits, and provider terms.\n'
-                          '- We are not responsible for provider outages, policy changes, or pricing changes.\n\n'
-                          '4) Availability and compatibility\n'
-                          '- Features may differ by platform/device capability.\n'
-                          '- Very large or malformed files may fail or perform slowly.\n'
-                          '- We may update, improve, or retire features to maintain app quality.\n\n'
-                          '5) Data and backup responsibility\n'
-                          '- Keep backups of important files.\n'
-                          '- You are responsible for secure handling, retention, and sharing of outputs.\n\n'
-                          '6) Limitation of liability\n'
-                          '- The app is provided "as is" without warranty of uninterrupted availability.\n'
-                          '- To the maximum extent permitted by law, we are not liable for indirect or consequential losses arising from app use.\n\n'
-                          '7) Contact\n'
-                          'For support or legal/terms questions: faujitec@gmail.com',
-                    ),
-                  ),
+                if (kIsWeb) return;
+                final uri = Platform.isIOS
+                    ? AppConstants.appStoreListingUri
+                    : AppConstants.playStoreListingUri;
+                final ok = await launchUrl(
+                  uri,
+                  mode: LaunchMode.externalApplication,
                 );
+                if (!context.mounted) return;
+                if (!ok) {
+                  UiSafety.showSnackBar(
+                    context,
+                    const SnackBar(
+                      content: Text('Could not open the store. Try again later.'),
+                    ),
+                  );
+                }
               },
             ),
             _DrawerActionTile(
@@ -694,7 +642,7 @@ class _AppDrawer extends StatelessWidget {
                           '- Scan documents with crop, rotate, filter, and PDF output\n'
                           '- Work with PDFs: merge, split, rearrange, rotate, delete, compress, protect, and OCR\n'
                           '- Use image tools: resize, crop, format convert, compress, and background removal\n'
-                          '- Use conversion tools: image/text/office conversion (local and cloud-supported paths)\n'
+                          '- Use conversion tools: image, text, PDF, and Word conversions on your device\n'
                           '- Manage generated outputs in My Files with open/share/rename/folder actions\n\n'
                           'Design goals:\n'
                           '- Keep common operations simple and fast\n'
@@ -704,10 +652,9 @@ class _AppDrawer extends StatelessWidget {
                           '- Adaptive previews for better portrait/landscape viewing\n'
                           '- Smoother PDF preview and large-file handling improvements\n'
                           '- Enhanced calculator experience with sliders, presets, and schedule breakdowns\n'
-                          '- Centralized settings for quality, cloud toggles, and scan behavior\n\n'
-                          'Cloud-aware workflow:\n'
-                          '- Some high-fidelity conversions use third-party cloud APIs when configured\n'
-                          '- You can disable cloud features in Settings for privacy-first usage\n\n'
+                          '- Centralized settings for quality and scan behavior\n\n'
+                          'Privacy-first workflow:\n'
+                          '- Conversions and PDF operations run locally on your device\n\n'
                           'Support and feedback:\n'
                           'We continuously improve based on user reports. For support or suggestions: faujitec@gmail.com',
                     ),
@@ -790,15 +737,20 @@ class _InfoPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bottomPad = edgeToEdgeBottomPadding(context);
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: Text(title)),
-      body: Padding(
+      body: ColoredBox(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: SingleChildScrollView(
+                padding: EdgeInsets.only(bottom: bottomPad),
                 child: Text(
                   content,
                   style: const TextStyle(fontSize: 15, height: 1.45),
@@ -807,6 +759,7 @@ class _InfoPage extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }
